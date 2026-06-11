@@ -1,12 +1,13 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
 interface Exposure { date: string; is_exposed: boolean }
 interface Post {
   id: string; keyword: string; product: string | null
   blog_url: string | null; hwaseon_url: string | null
-  tab: string | null; status: string
+  tab: string | null; status: string; brand: string | null
   amos_daily_exposure: Exposure[]
 }
 interface Capture {
@@ -48,9 +49,10 @@ export default function Home() {
   const [captures, setCaptures] = useState<Capture[]>([])
   const [loading, setLoading] = useState(true)
   const [capLoading, setCapLoading] = useState(false)
-  const [selected, setSelected] = useState<Post | null>(null)
-  // 3-level sidebar: brand always open, products closed by default
-  const [brandOpen, setBrandOpen] = useState(true)
+  // 선택 상태: 제품 선택 vs 키워드 선택 분리
+  const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null)
+  const [openBrands, setOpenBrands] = useState<Set<string>>(new Set(['아모스', '아윤체']))
   const [openProducts, setOpenProducts] = useState<Set<string>>(new Set())
   const [rangeMode, setRangeMode] = useState('30d')
   const [customStart, setCustomStart] = useState(toStr(new Date(Date.now() - 29 * 86400000)))
@@ -89,35 +91,87 @@ export default function Home() {
     }).finally(() => setCapLoading(false))
   }, [activeTab, captures.length])
 
-  // 3-level: 아모스 > product > keyword
+  // 3-level: 브랜드 > product > keyword
+  const brandProductMap: Record<string, Record<string, Post[]>> = {}
+  for (const p of posts) {
+    const brand = p.brand || '아모스'
+    const product = p.product || '(미분류)'
+    if (!brandProductMap[brand]) brandProductMap[brand] = {}
+    if (!brandProductMap[brand][product]) brandProductMap[brand][product] = []
+    brandProductMap[brand][product].push(p)
+  }
+  const brandList = Object.keys(brandProductMap).sort()
+  // 히트맵용 product별 posts 매핑
   const productMap: Record<string, Post[]> = {}
   for (const p of posts) {
     const key = p.product || '(미분류)'
     if (!productMap[key]) productMap[key] = []
     productMap[key].push(p)
   }
-  const products = Object.keys(productMap).sort()
 
-  const exposedCount = posts.filter(p => p.status === '노출중').length
+  // 히트맵에 표시할 포스트 결정
+  // - 키워드 선택: 해당 키워드만
+  // - 제품 선택: 해당 제품 전체
+  // - 아무것도 없으면: 노출중만
+  const exposedPosts = posts.filter(p => p.status === '노출중')
+  const heatmapPosts = selectedPost
+    ? [selectedPost]
+    : selectedProduct
+      ? (productMap[selectedProduct] || [])
+      : exposedPosts
+
+  const exposedCount = exposedPosts.length
   const avgDays = posts.length === 0 ? 0 :
     Math.round(posts.reduce((a, p) => a + (p.amos_daily_exposure || []).filter(e => e.is_exposed).length, 0) / posts.length)
   const totalClicks = Object.values(clicks).reduce((a, b) => a + b, 0)
 
   function inRange(e: Exposure) { return e.is_exposed && e.date >= range.start && e.date <= range.end }
 
+  // 선택된 키워드 도표 데이터 (일별 노출 bar chart)
+  const chartData = selectedPost ? days.map(d => {
+    const exposed = (selectedPost.amos_daily_exposure || []).some(e => e.date === d && e.is_exposed)
+    return { date: d.slice(5), exposed: exposed ? 1 : 0 }
+  }) : []
+
+  // 제품 클릭 핸들러
+  function handleProductClick(product: string, brand: string) {
+    const key = `${brand}/${product}`
+    const next = new Set(openProducts)
+    if (next.has(key)) { next.delete(key) } else { next.add(key) }
+    setOpenProducts(next)
+    setSelectedProduct(prev => prev === product ? null : product)
+    setSelectedPost(null)
+  }
+
+  // 키워드 클릭 핸들러 (사이드바 또는 히트맵 행)
+  function handleKeywordClick(p: Post) {
+    if (selectedPost?.id === p.id) {
+      setSelectedPost(null)
+    } else {
+      setSelectedPost(p)
+      setSelectedProduct(p.product)
+    }
+  }
+
   const batches = Array.from(new Set(captures.map(c => c.batch_id))).sort((a, b) => b.localeCompare(a))
   const activeBatch = capBatch || batches[0] || ''
   const filteredCaps = captures.filter(c => c.batch_id === activeBatch)
 
+  const heatmapLabel = selectedPost
+    ? selectedPost.keyword
+    : selectedProduct
+      ? selectedProduct
+      : '노출중'
+
   return (
     <div className="flex h-screen flex-col">
-      {/* 헤더 - 원본 CSS 클래스 */}
+      {/* 헤더 */}
       <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
         <h1 className="text-base font-bold text-gray-800">AMOS 블로그 노출 현황 대시보드</h1>
         <Link href="/admin" className="rounded border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-100">관리자</Link>
       </header>
 
-      {/* 탭 바 - 원본 CSS 클래스 */}
+      {/* 탭 바 */}
       <div className="bg-white border-b border-gray-200 px-2 flex">
         {([['exposure','노출현황'],['captures','캡처']] as const).map(([t, l]) => (
           <button key={t} onClick={() => setActiveTab(t)}
@@ -138,39 +192,48 @@ export default function Home() {
                 <div className="px-3 py-3 text-gray-400">불러오는 중...</div>
               ) : (
                 <>
-                  {/* Brand level - 아모스 */}
-                  <button
-                    onClick={() => setBrandOpen(o => !o)}
-                    className="flex w-full items-center gap-1 px-2 py-1.5 font-bold text-gray-800 hover:bg-gray-100">
-                    <span className="text-gray-500 text-[11px]">{brandOpen ? '▼' : '▶'}</span>
-                    <span>아모스</span>
-                    <span className="ml-auto text-gray-400 text-xs font-normal">{posts.length}</span>
-                  </button>
-                  {brandOpen && products.map(product => {
-                    const isOpen = openProducts.has(product)
+                  {/* Brand level - 동적 브랜드 */}
+                  {brandList.map(brand => {
+                    const isBrandOpen = openBrands.has(brand)
+                    const brandProducts = Object.keys(brandProductMap[brand]).sort()
+                    const brandCount = brandProducts.reduce((a, p) => a + brandProductMap[brand][p].length, 0)
                     return (
-                      <div key={product}>
-                        {/* Product level */}
+                      <div key={brand}>
                         <button
                           onClick={() => {
-                            const next = new Set(openProducts)
-                            if (next.has(product)) { next.delete(product) } else { next.add(product) }
-                            setOpenProducts(next)
+                            const next = new Set(openBrands)
+                            if (next.has(brand)) { next.delete(brand) } else { next.add(brand) }
+                            setOpenBrands(next)
                           }}
-                          className="flex w-full items-center gap-1 pl-4 pr-2 py-1.5 text-gray-700 hover:bg-gray-50">
-                          <span className="text-gray-400 text-[10px]">{isOpen ? '▼' : '▶'}</span>
-                          <span className="truncate text-xs font-medium">{product}</span>
-                          <span className="ml-auto text-gray-300 text-[10px]">{productMap[product].length}</span>
+                          className="flex w-full items-center gap-1 px-2 py-1.5 font-bold text-gray-800 hover:bg-gray-100">
+                          <span className="text-gray-500 text-[11px]">{isBrandOpen ? '▼' : '▶'}</span>
+                          <span>{brand}</span>
+                          <span className="ml-auto text-gray-400 text-xs font-normal">{brandCount}</span>
                         </button>
-                        {/* Keyword level */}
-                        {isOpen && productMap[product].map(p => (
-                          <button key={p.id}
-                            onClick={() => setSelected(selected?.id === p.id ? null : p)}
-                            className={`flex w-full items-center gap-1.5 pl-7 pr-2 py-1.5 text-xs transition-colors ${selected?.id === p.id ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${p.status === '노출중' ? 'bg-green-500' : p.status === '종료' ? 'bg-red-300' : 'bg-gray-300'}`} />
-                            <span className="truncate">{p.keyword}</span>
-                          </button>
-                        ))}
+                        {isBrandOpen && brandProducts.map(product => {
+                          const isOpen = openProducts.has(`${brand}/${product}`)
+                          const isSelected = selectedProduct === product
+                          const productPosts = brandProductMap[brand][product]
+                          return (
+                            <div key={product}>
+                              <button
+                                onClick={() => handleProductClick(product, brand)}
+                                className={`flex w-full items-center gap-1 pl-4 pr-2 py-1.5 hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
+                                <span className="text-gray-400 text-[10px]">{isOpen ? '▼' : '▶'}</span>
+                                <span className={`truncate text-xs font-medium ${isSelected ? 'text-blue-700' : 'text-gray-700'}`}>{product}</span>
+                                <span className="ml-auto text-gray-300 text-[10px]">{productPosts.length}</span>
+                              </button>
+                              {isOpen && productPosts.map(p => (
+                                <button key={p.id}
+                                  onClick={() => handleKeywordClick(p)}
+                                  className={`flex w-full items-center gap-1.5 pl-7 pr-2 py-1.5 text-xs transition-colors ${selectedPost?.id === p.id ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}>
+                                  <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${p.status === '노출중' ? 'bg-green-500' : p.status === '종료' ? 'bg-red-300' : 'bg-gray-300'}`} />
+                                  <span className="truncate">{p.keyword}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )
+                        })}
                       </div>
                     )
                   })}
@@ -229,13 +292,14 @@ export default function Home() {
             {/* 히트맵 */}
             <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4">
               <h2 className="text-sm font-semibold text-gray-700 mb-3">
-                데일리 노출 현황 {selected ? `(${selected.keyword})` : '(전체)'}
+                데일리 노출 현황 ({heatmapLabel})
               </h2>
               {loading ? (
-                <div className="text-sm text-gray-400 py-2">노출 데이터 로딩 중...</div>
+                <div className="text-sm text-gray-400 py-2">로딩 중...</div>
               ) : (
                 <div className="overflow-x-auto">
                   <div className="inline-block min-w-full">
+                    {/* 날짜 헤더 */}
                     <div className="flex gap-0.5 mb-1">
                       <div className="w-36 flex-shrink-0" />
                       {days.map(d => (
@@ -244,11 +308,15 @@ export default function Home() {
                         </div>
                       ))}
                     </div>
-                    {(selected ? [selected] : posts).map(p => {
+                    {/* 키워드 행 - 클릭 시 도표 표시 */}
+                    {heatmapPosts.map(p => {
                       const expSet = new Set((p.amos_daily_exposure || []).filter(e => inRange(e)).map(e => e.date))
+                      const isSelected = selectedPost?.id === p.id
                       return (
-                        <div key={p.id} className="flex items-center gap-0.5 mb-0.5">
-                          <div className="w-36 flex-shrink-0 text-xs text-gray-600 truncate pr-2">{p.keyword}</div>
+                        <div key={p.id}
+                          onClick={() => handleKeywordClick(p)}
+                          className={`flex items-center gap-0.5 mb-0.5 cursor-pointer rounded-sm ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                          <div className={`w-36 flex-shrink-0 text-xs truncate pr-2 ${isSelected ? 'text-blue-700 font-medium' : 'text-gray-600'}`}>{p.keyword}</div>
                           {days.map(d => (
                             <div key={d} title={`${p.keyword} ${d}`}
                               className={`w-5 h-4 rounded-sm flex-shrink-0 ${expSet.has(d) ? 'bg-green-500' : 'bg-gray-100'}`} />
@@ -256,7 +324,12 @@ export default function Home() {
                         </div>
                       )
                     })}
-                    {posts.length === 0 && <div className="text-sm text-gray-400">데이터가 없습니다. 관리자 페이지에서 Excel을 임포트하세요.</div>}
+                    {heatmapPosts.length === 0 && exposedPosts.length === 0 && posts.length > 0 && (
+                      <div className="text-sm text-gray-400 py-2">노출중인 키워드가 없습니다.</div>
+                    )}
+                    {posts.length === 0 && (
+                      <div className="text-sm text-gray-400 py-2">데이터가 없습니다. 관리자 페이지에서 Excel을 임포트하세요.</div>
+                    )}
                   </div>
                 </div>
               )}
@@ -264,38 +337,60 @@ export default function Home() {
                 <div className="flex gap-3 mt-2 text-xs text-gray-400">
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-500 inline-block" /> 노출</span>
                   <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-gray-100 border border-gray-200 inline-block" /> 미노출</span>
+                  <span className="text-gray-300">· 행 클릭 시 상세 도표</span>
                 </div>
               )}
             </div>
 
-            {/* 선택 키워드 상세 */}
-            {!selected ? (
+            {/* 키워드 선택 시 도표 */}
+            {!selectedPost ? (
               <div className="text-sm text-gray-400 text-center py-4">
                 좌측에서 키워드를 선택하면 방문자수 차트가 표시됩니다.
               </div>
             ) : (
               <div className="bg-white rounded-xl border border-gray-200 p-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <h3 className="font-semibold text-gray-800 text-base">{selected.keyword}</h3>
-                  <span className={`px-2 py-0.5 text-xs rounded-full font-semibold ${selected.status === '노출중' ? 'bg-green-100 text-green-700' : selected.status === '종료' ? 'bg-red-50 text-red-500' : 'bg-gray-100 text-gray-500'}`}>
-                    {selected.status}
+                {/* 키워드 정보 */}
+                <div className="flex items-center gap-3 mb-4">
+                  <h3 className="font-semibold text-gray-800 text-base">{selectedPost.keyword}</h3>
+                  <span className={`px-2 py-0.5 text-xs rounded-full font-semibold ${selectedPost.status === '노출중' ? 'bg-green-100 text-green-700' : selectedPost.status === '종료' ? 'bg-red-50 text-red-500' : 'bg-gray-100 text-gray-500'}`}>
+                    {selectedPost.status}
                   </span>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-3">
-                  <div><span className="text-gray-400 text-xs block">제품</span>{selected.product || '-'}</div>
-                  <div><span className="text-gray-400 text-xs block">노출탭</span>{selected.tab || '-'}</div>
-                  <div><span className="text-gray-400 text-xs block">노출일수</span>{(selected.amos_daily_exposure || []).filter(e => e.is_exposed).length}일</div>
-                  <div><span className="text-gray-400 text-xs block">총 클릭수</span>{clicks[selected.id] != null ? clicks[selected.id].toLocaleString() : '-'}</div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-5">
+                  <div><span className="text-gray-400 text-xs block">제품</span>{selectedPost.product || '-'}</div>
+                  <div><span className="text-gray-400 text-xs block">노출탭</span>{selectedPost.tab || '-'}</div>
+                  <div><span className="text-gray-400 text-xs block">노출일수</span>{(selectedPost.amos_daily_exposure || []).filter(e => e.is_exposed).length}일</div>
+                  <div><span className="text-gray-400 text-xs block">총 클릭수</span>{clicks[selectedPost.id] != null ? clicks[selectedPost.id].toLocaleString() : '-'}</div>
                 </div>
-                <div className="flex gap-3 flex-wrap">
-                  {selected.blog_url && (
-                    <a href={selected.blog_url} target="_blank" rel="noreferrer" className="text-blue-500 text-xs hover:underline truncate">
-                      발행 URL: {selected.blog_url}
+
+                {/* 일별 노출 도표 */}
+                <h4 className="text-xs font-semibold text-gray-500 mb-2">일별 노출 현황</h4>
+                <ResponsiveContainer width="100%" height={120}>
+                  <BarChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                    <XAxis dataKey="date" tick={{ fontSize: 9 }} interval={Math.floor(chartData.length / 10)} />
+                    <YAxis hide domain={[0, 1]} />
+                    <Tooltip
+                      formatter={(v) => [v === 1 ? '노출' : '미노출', '']}
+                      labelFormatter={(l) => `날짜: ${l}`}
+                    />
+                    <Bar dataKey="exposed" radius={[2, 2, 0, 0]}>
+                      {chartData.map((entry, i) => (
+                        <Cell key={i} fill={entry.exposed ? '#22c55e' : '#e5e7eb'} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+
+                {/* URL 링크 */}
+                <div className="flex gap-3 flex-wrap mt-3">
+                  {selectedPost.blog_url && (
+                    <a href={selectedPost.blog_url} target="_blank" rel="noreferrer" className="text-blue-500 text-xs hover:underline truncate">
+                      발행 URL: {selectedPost.blog_url}
                     </a>
                   )}
-                  {selected.hwaseon_url && (
-                    <a href={selected.hwaseon_url} target="_blank" rel="noreferrer" className="text-purple-500 text-xs hover:underline truncate">
-                      제품링크: {selected.hwaseon_url}
+                  {selectedPost.hwaseon_url && (
+                    <a href={selectedPost.hwaseon_url} target="_blank" rel="noreferrer" className="text-purple-500 text-xs hover:underline truncate">
+                      제품링크: {selectedPost.hwaseon_url}
                     </a>
                   )}
                 </div>
