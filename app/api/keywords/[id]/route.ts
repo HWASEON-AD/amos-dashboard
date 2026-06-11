@@ -3,14 +3,11 @@ import { supabaseAdmin } from '@/lib/supabase'
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const body = await req.json()
-  const { keyword, blog_url, hwaseon_url, tab, status } = body
 
   const updates: Record<string, string | null> = { updated_at: new Date().toISOString() }
-  if (keyword !== undefined) updates.keyword = keyword
-  if (blog_url !== undefined) updates.blog_url = blog_url || null
-  if (hwaseon_url !== undefined) updates.hwaseon_url = hwaseon_url || null
-  if (tab !== undefined) updates.tab = tab || null
-  if (status !== undefined) updates.status = status
+  for (const field of ['keyword', 'product', 'blog_url', 'hwaseon_url', 'tab', 'status']) {
+    if (body[field] !== undefined) updates[field] = body[field] || null
+  }
 
   const { data, error } = await supabaseAdmin
     .from('amos_posts')
