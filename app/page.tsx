@@ -1,33 +1,52 @@
 'use client'
-
 import { useEffect, useState, useCallback } from 'react'
-import Link from 'next/link'
 
-interface DailyExposure {
-  date: string
-  is_exposed: boolean
-}
-
+interface Exposure { date: string; is_exposed: boolean }
 interface Keyword {
-  id: string
-  keyword: string
-  product: string | null
-  blog_url: string | null
-  hwaseon_url: string | null
-  tab: string | null
-  status: string
-  updated_at: string
-  amos_daily_exposure: DailyExposure[]
+  id: string; keyword: string; product: string | null
+  blog_url: string | null; hwaseon_url: string | null
+  tab: string | null; status: string
+  amos_daily_exposure: Exposure[]
 }
 
-function getShortCode(hwaseonUrl: string | null): string | null {
-  if (!hwaseonUrl) return null
-  try {
-    const u = new URL(hwaseonUrl)
-    return u.pathname.replace('/', '').split('/')[0] || null
-  } catch {
-    return null
+function getCode(url: string | null) {
+  if (!url) return null
+  try { return new URL(url).pathname.replace('/', '').split('/')[0] || null } catch { return null }
+}
+
+function Badge({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    '노출중': 'bg-green-100 text-green-700',
+    '미노출': 'bg-gray-100 text-gray-500',
+    '종료': 'bg-red-50 text-red-500',
   }
+  return <span className={`px-2 py-0.5 text-xs rounded-full font-semibold ${map[status] || 'bg-gray-100 text-gray-400'}`}>{status || '-'}</span>
+}
+
+// 최근 30일 히트맵
+function Heatmap({ keywords }: { keywords: Keyword[] }) {
+  const days = Array.from({ length: 30 }, (_, i) => {
+    const d = new Date(); d.setDate(d.getDate() - (29 - i))
+    return d.toISOString().slice(0, 10)
+  })
+  const exposedSet = new Set(
+    keywords.flatMap(k => (k.amos_daily_exposure || []).filter(e => e.is_exposed).map(e => e.date))
+  )
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+      <div className="text-sm font-semibold text-gray-700 mb-3">노출 히트맵 (최근 30일)</div>
+      <div className="flex gap-1 flex-wrap">
+        {days.map(d => (
+          <div key={d} title={d}
+            className={`w-6 h-6 rounded text-xs flex items-center justify-center ${exposedSet.has(d) ? 'bg-green-500' : 'bg-gray-100'}`} />
+        ))}
+      </div>
+      <div className="flex gap-3 mt-2 text-xs text-gray-400">
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-500 inline-block" /> 노출</span>
+        <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-gray-200 inline-block" /> 미노출</span>
+      </div>
+    </div>
+  )
 }
 
 export default function Home() {
@@ -36,161 +55,95 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
 
-  const fetchKeywords = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true)
-    const res = await fetch('/api/keywords')
-    const data = await res.json()
-    setKeywords(data || [])
+    const r = await fetch('/api/keywords')
+    const data = await r.json()
+    setKeywords(Array.isArray(data) ? data : [])
     setLoading(false)
 
-    const codes = (data || [])
-      .map((k: Keyword) => ({ id: k.id, code: getShortCode(k.hwaseon_url) }))
-      .filter((x: { id: string; code: string | null }) => x.code)
-
-    const clickMap: Record<string, number> = {}
-    await Promise.all(
-      codes.map(async ({ id, code }: { id: string; code: string }) => {
-        try {
-          const r = await fetch(`/api/clicks?code=${code}`)
-          const d = await r.json()
-          clickMap[id] = d.totalVisits ?? 0
-        } catch { clickMap[id] = 0 }
-      })
-    )
-    setClicks(clickMap)
+    const codes = (Array.isArray(data) ? data : []).map((k: Keyword) => ({ id: k.id, code: getCode(k.hwaseon_url) })).filter((x): x is { id: string; code: string } => !!x.code)
+    const map: Record<string, number> = {}
+    await Promise.all(codes.map(async ({ id, code }) => {
+      try { const r = await fetch(`/api/clicks?code=${code}`); const d = await r.json(); map[id] = d.totalVisits ?? 0 } catch { map[id] = 0 }
+    }))
+    setClicks(map)
   }, [])
 
-  useEffect(() => { fetchKeywords() }, [fetchKeywords])
+  useEffect(() => { load() }, [load])
 
   const filtered = keywords.filter(k =>
     k.keyword.toLowerCase().includes(search.toLowerCase()) ||
-    (k.product || '').toLowerCase().includes(search.toLowerCase()) ||
-    (k.tab || '').toLowerCase().includes(search.toLowerCase())
+    (k.product || '').toLowerCase().includes(search.toLowerCase())
   )
-
   const exposed = keywords.filter(k => k.status === '노출중').length
   const totalClicks = Object.values(clicks).reduce((a, b) => a + b, 0)
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">AMOS 노출 대시보드</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            총 {keywords.length}개 키워드 &middot; 노출중 {exposed}개
-          </p>
-        </div>
-        <Link
-          href="/admin"
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 transition-colors"
-        >
-          어드민 관리
-        </Link>
+      {/* KPI */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        {[
+          { label: '전체 키워드', val: keywords.length, color: 'bg-blue-50 text-blue-700' },
+          { label: '노출중', val: exposed, color: 'bg-green-50 text-green-700' },
+          { label: '미노출', val: keywords.length - exposed, color: 'bg-gray-50 text-gray-600' },
+          { label: '총 클릭수', val: totalClicks, color: 'bg-purple-50 text-purple-700' },
+        ].map(c => (
+          <div key={c.label} className={`rounded-xl p-4 ${c.color}`}>
+            <div className="text-2xl font-bold">{c.val.toLocaleString()}</div>
+            <div className="text-xs mt-1 opacity-70">{c.label}</div>
+          </div>
+        ))}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-        <StatCard label="전체 키워드" value={keywords.length} color="blue" />
-        <StatCard label="노출중" value={exposed} color="green" />
-        <StatCard label="미노출" value={keywords.length - exposed} color="gray" />
-        <StatCard label="총 클릭수" value={totalClicks} color="purple" />
-      </div>
+      <Heatmap keywords={keywords} />
 
-      <input
-        type="text"
-        placeholder="제품명, 키워드, 탭으로 검색..."
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        className="w-full border border-gray-300 rounded-lg px-4 py-2 mb-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-      />
+      <input value={search} onChange={e => setSearch(e.target.value)}
+        placeholder="제품명, 키워드 검색..."
+        className="w-full border border-gray-300 rounded-lg px-4 py-2 mb-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
 
       {loading ? (
-        <div className="text-center py-12 text-gray-400">로딩 중...</div>
+        <div className="text-center py-16 text-gray-400">로딩 중...</div>
       ) : (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto">
-          <table className="w-full text-sm min-w-[900px]">
-            <thead className="bg-gray-50 text-gray-600">
+        <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+          <table className="w-full text-sm min-w-[860px]">
+            <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
-                <th className="text-left px-3 py-3 font-medium">상태</th>
-                <th className="text-left px-3 py-3 font-medium">제품</th>
-                <th className="text-left px-3 py-3 font-medium">키워드</th>
-                <th className="text-left px-3 py-3 font-medium">노출탭</th>
-                <th className="text-left px-3 py-3 font-medium">발행URL</th>
-                <th className="text-left px-3 py-3 font-medium">제품링크URL</th>
-                <th className="text-right px-3 py-3 font-medium">마지막 노출일</th>
-                <th className="text-right px-3 py-3 font-medium">총 클릭수</th>
+                {['상태','제품','키워드','노출탭','발행URL','제품링크URL','마지막 노출일','클릭수'].map(h => (
+                  <th key={h} className="text-left px-3 py-3 font-medium">{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filtered.map(k => {
-                const exposures = k.amos_daily_exposure || []
-                const lastExposed = exposures
-                  .filter(e => e.is_exposed)
-                  .sort((a, b) => b.date.localeCompare(a.date))[0]
-                const shortCode = getShortCode(k.hwaseon_url)
-
+                const last = [...(k.amos_daily_exposure || [])].filter(e => e.is_exposed).sort((a,b) => b.date.localeCompare(a.date))[0]
+                const code = getCode(k.hwaseon_url)
                 return (
                   <tr key={k.id} className="hover:bg-gray-50">
-                    <td className="px-3 py-3">
-                      <span className={`px-2 py-0.5 text-xs rounded-full font-semibold whitespace-nowrap ${
-                        k.status === '노출중' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'
-                      }`}>{k.status}</span>
+                    <td className="px-3 py-3"><Badge status={k.status} /></td>
+                    <td className="px-3 py-3 text-gray-700 text-xs">{k.product || '-'}</td>
+                    <td className="px-3 py-3 font-medium text-gray-900">{k.keyword}</td>
+                    <td className="px-3 py-3 text-gray-500 text-xs">{k.tab || '-'}</td>
+                    <td className="px-3 py-3 max-w-[150px]">
+                      {k.blog_url ? <a href={k.blog_url} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline text-xs truncate block max-w-[140px]">{k.blog_url}</a> : <span className="text-gray-300 text-xs">-</span>}
                     </td>
-                    <td className="px-3 py-3 text-gray-700 font-medium">{k.product || '-'}</td>
-                    <td className="px-3 py-3 font-semibold text-gray-900">{k.keyword}</td>
-                    <td className="px-3 py-3 text-gray-500">{k.tab || '-'}</td>
-                    <td className="px-3 py-3 max-w-[160px]">
-                      {k.blog_url ? (
-                        <a href={k.blog_url} target="_blank" rel="noreferrer"
-                          className="text-blue-500 hover:underline text-xs truncate block max-w-[150px]">
-                          {k.blog_url}
-                        </a>
-                      ) : <span className="text-gray-300 text-xs">-</span>}
+                    <td className="px-3 py-3 max-w-[140px]">
+                      {k.hwaseon_url ? <a href={k.hwaseon_url} target="_blank" rel="noreferrer" className="text-purple-500 hover:underline text-xs truncate block max-w-[130px]">{k.hwaseon_url}</a> : <span className="text-gray-300 text-xs">-</span>}
                     </td>
-                    <td className="px-3 py-3 max-w-[160px]">
-                      {k.hwaseon_url ? (
-                        <a href={k.hwaseon_url} target="_blank" rel="noreferrer"
-                          className="text-purple-500 hover:underline text-xs truncate block max-w-[150px]">
-                          {k.hwaseon_url}
-                        </a>
-                      ) : <span className="text-gray-300 text-xs">-</span>}
-                    </td>
-                    <td className="px-3 py-3 text-right text-gray-500 text-xs whitespace-nowrap">
-                      {lastExposed ? lastExposed.date : '-'}
-                    </td>
+                    <td className="px-3 py-3 text-gray-400 text-xs">{last?.date || '-'}</td>
                     <td className="px-3 py-3 text-right">
-                      {shortCode && clicks[k.id] !== undefined ? (
-                        <span className="font-semibold text-purple-700">{clicks[k.id].toLocaleString()}</span>
-                      ) : <span className="text-gray-300">-</span>}
+                      {code && clicks[k.id] != null ? <span className="font-semibold text-purple-700">{clicks[k.id].toLocaleString()}</span> : <span className="text-gray-300">-</span>}
                     </td>
                   </tr>
                 )
               })}
               {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="text-center py-8 text-gray-400">
-                    {search ? '검색 결과 없음' : '등록된 키워드가 없습니다'}
-                  </td>
-                </tr>
+                <tr><td colSpan={8} className="text-center py-10 text-gray-400">데이터 없음</td></tr>
               )}
             </tbody>
           </table>
         </div>
       )}
-    </div>
-  )
-}
-
-function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
-  const colors: Record<string, string> = {
-    blue: 'bg-blue-50 text-blue-700',
-    green: 'bg-green-50 text-green-700',
-    gray: 'bg-gray-50 text-gray-600',
-    purple: 'bg-purple-50 text-purple-700',
-  }
-  return (
-    <div className={`rounded-xl p-4 ${colors[color] || colors.gray}`}>
-      <div className="text-2xl font-bold">{value.toLocaleString()}</div>
-      <div className="text-xs mt-1 opacity-70">{label}</div>
     </div>
   )
 }
