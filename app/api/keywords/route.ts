@@ -2,13 +2,31 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 
 export async function GET() {
-  const { data, error } = await supabaseAdmin
+  // 두 테이블 별도 조회 후 코드에서 합치기 (nested select 관계 인식 문제 우회)
+  const { data: posts, error: postsErr } = await supabaseAdmin
     .from('amos_posts')
-    .select('*, amos_daily_exposure(date, is_exposed, created_at)')
+    .select('*')
     .order('keyword')
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
-  return NextResponse.json(data)
+  if (postsErr) return NextResponse.json({ error: postsErr.message }, { status: 500 })
+
+  const { data: exposures } = await supabaseAdmin
+    .from('amos_daily_exposure')
+    .select('post_id, date, is_exposed, created_at')
+
+  // 포스트별 노출 기록 합치기
+  const exposureMap: Record<string, { date: string; is_exposed: boolean; created_at: string }[]> = {}
+  for (const e of exposures || []) {
+    if (!exposureMap[e.post_id]) exposureMap[e.post_id] = []
+    exposureMap[e.post_id].push({ date: e.date, is_exposed: e.is_exposed, created_at: e.created_at })
+  }
+
+  const result = (posts || []).map(p => ({
+    ...p,
+    amos_daily_exposure: exposureMap[p.id] || [],
+  }))
+
+  return NextResponse.json(result)
 }
 
 export async function POST(req: NextRequest) {
