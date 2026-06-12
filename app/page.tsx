@@ -333,7 +333,10 @@ export default function Home() {
                         <div key={p.id}
                           onClick={() => handleKeywordClick(p)}
                           className={`flex items-center gap-0.5 mb-0.5 cursor-pointer rounded-sm ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
-                          <div className={`w-36 flex-shrink-0 text-xs truncate pr-2 ${isSelected ? 'text-blue-700 font-medium' : 'text-gray-600'}`}>{p.keyword}</div>
+                          <div className={`w-36 flex-shrink-0 text-xs truncate pr-2 flex items-center gap-1 ${isSelected ? 'text-blue-700 font-medium' : 'text-gray-600'}`}>
+                            <span className="truncate">{p.keyword}</span>
+                            <span className="flex-shrink-0 text-gray-400">{p.amos_daily_exposure.length}일</span>
+                          </div>
                           {days.map(d => (
                             <div key={d} title={`${p.keyword} ${d}`}
                               className={`w-5 h-4 rounded-sm flex-shrink-0 ${expSet.has(d) ? 'bg-green-500' : 'bg-gray-100'}`} />
