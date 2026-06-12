@@ -2,58 +2,72 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import * as XLSX from 'xlsx'
 
+function dateRange(start: string, end: string): string[] {
+  const dates: string[] = []
+  const cur = new Date(start)
+  const last = new Date(end)
+  while (cur <= last) {
+    dates.push(cur.toISOString().slice(0, 10))
+    cur.setDate(cur.getDate() + 1)
+  }
+  return dates
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
-  const start = searchParams.get('start') || '2020-01-01'
-  const end = searchParams.get('end') || new Date().toISOString().slice(0, 10)
+  const today = new Date().toISOString().slice(0, 10)
+  const defaultStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+  const start = searchParams.get('start') || defaultStart
+  const end = searchParams.get('end') || today
 
-  const { data: posts } = await supabaseAdmin.from('amos_posts').select('*').order('keyword')
+  const { data: posts } = await supabaseAdmin
+    .from('amos_posts')
+    .select('*')
+    .order('brand')
+    .order('product')
+    .order('keyword')
+
   const { data: exposures } = await supabaseAdmin
     .from('amos_daily_exposure')
-    .select('post_id, date, is_exposed')
+    .select('post_id, date')
     .gte('date', start)
     .lte('date', end)
 
-  // ── Sheet 1: 키워드목록 ──
-  const sheet1Rows = (posts || []).map(p => ({
-    '브랜드': p.brand || '아모스',
-    '제품': p.product || '',
-    '키워드': p.keyword,
-    '노출탭': p.tab || '',
-    '발행URL': p.blog_url || '',
-    '제품링크URL': p.hwaseon_url || '',
-    '상태': p.status || '',
-  }))
+  // 날짜 컬럼: start~end 전체 + DB에 있는 날짜 합산 (정렬)
+  const dbDates = Array.from(new Set((exposures || []).map(e => e.date)))
+  const allDates = Array.from(new Set([...dateRange(start, end), ...dbDates])).sort()
 
-  // ── Sheet 2: 노출기록 (키워드 × 날짜 피벗) ──
-  const allDates = Array.from(new Set((exposures || []).map(e => e.date))).sort()
-
-  // post_id → date → is_exposed
-  const expMap: Record<string, Record<string, boolean>> = {}
+  // post_id → Set<date> (노출된 날짜만)
+  const expMap: Record<string, Set<string>> = {}
   for (const e of exposures || []) {
-    if (!expMap[e.post_id]) expMap[e.post_id] = {}
-    expMap[e.post_id][e.date] = e.is_exposed
+    if (!expMap[e.post_id]) expMap[e.post_id] = new Set()
+    expMap[e.post_id].add(e.date)
   }
 
-  const sheet2Headers = ['키워드', '제품', '브랜드', ...allDates]
-  const sheet2Data = (posts || []).map(p => {
-    const row: (string | number)[] = [p.keyword, p.product || '', p.brand || '아모스']
+  // 단일 시트: 브랜드|제품|키워드|노출탭|발행URL|제품링크URL|날짜1|날짜2|...
+  const headers = ['브랜드', '제품', '키워드', '노출탭', '발행URL', '제품링크URL', ...allDates]
+  const dataRows = (posts || []).map(p => {
+    const row: (string)[] = [
+      p.brand || '아모스',
+      p.product || '',
+      p.keyword,
+      p.tab_type || '',
+      p.blog_url || '',
+      p.hwaseon_url || '',
+    ]
     for (const d of allDates) {
-      const val = expMap[p.id]?.[d]
-      row.push(val === true ? 1 : val === false ? 0 : '')
+      row.push(expMap[p.id]?.has(d) ? '노출' : '')
     }
     return row
   })
 
   const wb = XLSX.utils.book_new()
-
-  const ws1 = XLSX.utils.json_to_sheet(sheet1Rows)
-  ws1['!cols'] = [{ wch: 8 }, { wch: 15 }, { wch: 30 }, { wch: 10 }, { wch: 45 }, { wch: 35 }, { wch: 8 }]
-  XLSX.utils.book_append_sheet(wb, ws1, '키워드목록')
-
-  const ws2 = XLSX.utils.aoa_to_sheet([sheet2Headers, ...sheet2Data])
-  ws2['!cols'] = [{ wch: 30 }, { wch: 15 }, { wch: 8 }, ...allDates.map(() => ({ wch: 12 }))]
-  XLSX.utils.book_append_sheet(wb, ws2, '노출기록')
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows])
+  ws['!cols'] = [
+    { wch: 8 }, { wch: 18 }, { wch: 28 }, { wch: 12 }, { wch: 45 }, { wch: 35 },
+    ...allDates.map(() => ({ wch: 11 })),
+  ]
+  XLSX.utils.book_append_sheet(wb, ws, '노출현황')
 
   const buf = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' }) as string
   const binary = Buffer.from(buf, 'base64')

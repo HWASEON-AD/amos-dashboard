@@ -6,7 +6,7 @@ interface Exposure { date: string; is_exposed: boolean }
 interface Keyword {
   id: string; keyword: string; product: string | null
   blog_url: string | null; hwaseon_url: string | null
-  tab: string | null; status: string; brand: string | null
+  tab_type: string | null; status: string; brand: string | null
   amos_daily_exposure: Exposure[]
 }
 
@@ -21,22 +21,23 @@ function getCode(url: string | null) {
 function parsePaste(raw: string) {
   return raw.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
     const c = l.split('\t')
-    return { brand: c[0]?.trim() || '아모스', product: c[1]?.trim() || '', keyword: c[2]?.trim() || c[0]?.trim() || '', tab: c[3]?.trim() || '', blog_url: c[4]?.trim() || '', hwaseon_url: c[5]?.trim() || '' }
+    return { brand: c[0]?.trim() || '아모스', product: c[1]?.trim() || '', keyword: c[2]?.trim() || c[0]?.trim() || '', tab_type: c[3]?.trim() || '', blog_url: c[4]?.trim() || '', hwaseon_url: c[5]?.trim() || '' }
   }).filter(r => r.keyword)
 }
 
 function parseXlsx(buf: ArrayBuffer) {
-  const wb = XLSX.read(buf, { type: 'array' })
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true })
   const ws = wb.Sheets[wb.SheetNames[0]]
-  const rows: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+  const rows: (string | number | Date | null)[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
   const hi = rows.findIndex(r => r.some(c => ['키워드', '검색어'].includes(String(c).trim())))
+  const headerRow = hi >= 0 ? rows[hi] : rows[0]
   const dataRows = hi >= 0 ? rows.slice(hi + 1) : rows.slice(1)
-  const headers = (hi >= 0 ? rows[hi] : ['브랜드', '제품', '키워드', '탭', '발행URL', '제품링크URL']).map(c => String(c).toLowerCase())
+  const headers = headerRow.map(c => String(c ?? '').toLowerCase())
   const ci = {
     brand: headers.findIndex(h => ['브랜드', 'brand'].some(k => h.includes(k))),
-    product: headers.findIndex(h => ['제품', 'product', '상품'].some(k => h.includes(k))),
+    product: headers.findIndex(h => ['제품', 'product', '상품'].some(k => h.includes(k)) && !h.includes('링크')),
     keyword: headers.findIndex(h => ['키워드', '검색어', 'keyword'].some(k => h.includes(k))),
-    tab: headers.findIndex(h => ['탭', 'tab', '노출'].some(k => h.includes(k))),
+    tab: headers.findIndex(h => ['탭', 'tab', '노출탭'].some(k => h.includes(k))),
     blog_url: headers.findIndex(h => ['발행', 'blog'].some(k => h.includes(k)) && !h.includes('hwaseon') && !h.includes('제품')),
     hwaseon_url: headers.findIndex(h => ['hwaseon', '단축', '제품링크'].some(k => h.includes(k))),
   }
@@ -44,7 +45,7 @@ function parseXlsx(buf: ArrayBuffer) {
     brand: String(r[ci.brand >= 0 ? ci.brand : 0] ?? '').trim() || '아모스',
     product: String(r[ci.product >= 0 ? ci.product : 1] ?? '').trim(),
     keyword: String(r[ci.keyword >= 0 ? ci.keyword : 2] ?? '').trim(),
-    tab: String(r[ci.tab >= 0 ? ci.tab : 3] ?? '').trim(),
+    tab_type: String(r[ci.tab >= 0 ? ci.tab : 3] ?? '').trim(),
     blog_url: String(r[ci.blog_url >= 0 ? ci.blog_url : 4] ?? '').trim(),
     hwaseon_url: String(r[ci.hwaseon_url >= 0 ? ci.hwaseon_url : 5] ?? '').trim(),
   })).filter(r => r.keyword)
@@ -53,29 +54,35 @@ function parseXlsx(buf: ArrayBuffer) {
 type ExposureRow = { keyword: string; product: string; brand: string; date: string; is_exposed: boolean }
 
 function parseXlsxExposure(buf: ArrayBuffer): ExposureRow[] {
-  const wb = XLSX.read(buf, { type: 'array' })
-  // 시트2 = '노출기록' 또는 두번째 시트
-  const sheetName = wb.SheetNames.find(n => n.includes('노출기록')) ?? wb.SheetNames[1]
-  if (!sheetName) return []
-  const ws = wb.Sheets[sheetName]
-  const rows: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+  // 단일 시트에서 날짜 컬럼 파싱 (브랜드|제품|키워드|노출탭|발행URL|제품링크URL|날짜1|날짜2|...)
+  const wb = XLSX.read(buf, { type: 'array', cellDates: true })
+  const ws = wb.Sheets[wb.SheetNames[0]]
+  const rows: (string | number | Date | null)[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
   if (rows.length < 2) return []
-  const headers = rows[0].map(h => String(h).trim())
+  const headers = rows[0].map(h => {
+    if (h instanceof Date) return h.toISOString().slice(0, 10)
+    return String(h ?? '').trim()
+  })
   const kwIdx = headers.findIndex(h => ['키워드', 'keyword'].some(k => h.toLowerCase().includes(k)))
-  const prIdx = headers.findIndex(h => ['제품', 'product'].some(k => h.toLowerCase().includes(k)))
+  const prIdx = headers.findIndex(h => ['제품', 'product'].some(k => h.toLowerCase().includes(k)) && !h.includes('링크'))
   const brIdx = headers.findIndex(h => ['브랜드', 'brand'].some(k => h.toLowerCase().includes(k)))
-  // 날짜 컬럼: YYYY-MM-DD 형식
   const dateCols = headers.map((h, i) => ({ date: h, i })).filter(({ date }) => /^\d{4}-\d{2}-\d{2}$/.test(date))
+  if (!dateCols.length) return []
   const result: ExposureRow[] = []
+  const seen = new Set<string>()
   for (const row of rows.slice(1)) {
-    const keyword = String(row[kwIdx >= 0 ? kwIdx : 0] ?? '').trim()
+    const keyword = String(row[kwIdx >= 0 ? kwIdx : 2] ?? '').trim()
     if (!keyword) continue
     const product = String(row[prIdx >= 0 ? prIdx : 1] ?? '').trim()
-    const brand = String(row[brIdx >= 0 ? brIdx : 2] ?? '').trim() || '아모스'
+    const brand = String(row[brIdx >= 0 ? brIdx : 0] ?? '').trim() || '아모스'
     for (const { date, i } of dateCols) {
       const val = String(row[i] ?? '').trim()
-      if (val === '') continue
-      result.push({ keyword, product, brand, date, is_exposed: val === '1' || val.toLowerCase() === 'true' })
+      if (!val) continue
+      const is_exposed = val.includes('노출') && !val.includes('미노출') || val === '1' || val.toLowerCase() === 'true'
+      const uniq = `${keyword}|||${date}`
+      if (seen.has(uniq)) continue
+      seen.add(uniq)
+      result.push({ keyword, product, brand, date, is_exposed })
     }
   }
   return result
@@ -85,8 +92,8 @@ export default function AdminPage() {
   const [rows, setRows] = useState<Keyword[]>([])
   const [loading, setLoading] = useState(true)
   const [editId, setEditId] = useState<string | null>(null)
-  const [edit, setEdit] = useState({ keyword: '', product: '', blog_url: '', hwaseon_url: '', tab: '', status: '', brand: '아모스' })
-  const [newRow, setNew] = useState({ keyword: '', product: '', blog_url: '', hwaseon_url: '', tab: '', brand: '아모스' })
+  const [edit, setEdit] = useState({ keyword: '', product: '', blog_url: '', hwaseon_url: '', tab_type: '', status: '', brand: '아모스' })
+  const [newRow, setNew] = useState({ keyword: '', product: '', blog_url: '', hwaseon_url: '', tab_type: '', brand: '아모스' })
   const [pasteText, setPaste] = useState('')
   const [pasteMode, setPasteMode] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -142,10 +149,10 @@ export default function AdminPage() {
   async function add() {
     if (!newRow.keyword.trim()) return flash('키워드 필수', false)
     const r = await fetch('/api/keywords', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newRow) })
-    if (r.ok) { setNew({ keyword: '', product: '', blog_url: '', hwaseon_url: '', tab: '', brand: '아모스' }); load() } else flash('추가 실패', false)
+    if (r.ok) { setNew({ keyword: '', product: '', blog_url: '', hwaseon_url: '', tab_type: '', brand: '아모스' }); load() } else flash('추가 실패', false)
   }
 
-  async function importRows(data: { keyword: string; product: string; tab: string; blog_url: string; hwaseon_url: string; brand: string }[]) {
+  async function importRows(data: { keyword: string; product: string; tab_type: string; blog_url: string; hwaseon_url: string; brand: string }[]) {
     if (!data.length) return flash('파싱된 데이터 없음', false)
     if (replaceMode && !confirm(`기존 데이터 전체(${rows.length}개)를 삭제하고 새 데이터(${data.length}개)로 교체합니다. 계속하시겠습니까?`)) return
     setImporting(true)
@@ -165,14 +172,19 @@ export default function AdminPage() {
   }
 
   function downloadTemplate() {
+    const dates: string[] = []
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000)
+      dates.push(d.toISOString().slice(0, 10))
+    }
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.aoa_to_sheet([
-      ['브랜드', '제품', '키워드', '노출탭', '발행URL', '제품링크URL'],
-      ['아모스', '헤어오일', '아모스 헤어오일 효능', '블로그', 'https://blog.naver.com/example/123', 'https://hwaseon-url.com/abc'],
-      ['아윤체', '샴푸', '아윤체 두피 샴푸', '블로그', '', ''],
+      ['브랜드', '제품', '키워드', '노출탭', '발행URL', '제품링크URL', ...dates],
+      ['아모스', '헤어오일', '아모스 헤어오일 효능', '인플루언서 블로그', 'https://blog.naver.com/example/123', '', ...dates.map(() => '')],
+      ['아윤체', '샴푸', '아윤체 두피 샴푸', '블로그', '', '', ...dates.map(() => '')],
     ])
-    ws['!cols'] = [{ wch: 10 }, { wch: 18 }, { wch: 28 }, { wch: 10 }, { wch: 40 }, { wch: 30 }]
-    XLSX.utils.book_append_sheet(wb, ws, '키워드목록')
+    ws['!cols'] = [{ wch: 8 }, { wch: 15 }, { wch: 28 }, { wch: 12 }, { wch: 45 }, { wch: 35 }, ...dates.map(() => ({ wch: 11 }))]
+    XLSX.utils.book_append_sheet(wb, ws, '노출현황')
     XLSX.writeFile(wb, '아모스_키워드_양식.xlsx')
   }
 
@@ -360,7 +372,7 @@ export default function AdminPage() {
                               </td>
                             ))}
                             <td className="px-2 py-1.5">
-                              <input value={edit.tab} onChange={e => setEdit(p => ({ ...p, tab: e.target.value }))}
+                              <input value={edit.tab_type} onChange={e => setEdit(p => ({ ...p, tab_type: e.target.value }))}
                                 className="border border-blue-400 rounded px-2 py-1 text-xs w-full min-w-[60px]" />
                             </td>
                             {(['blog_url', 'hwaseon_url'] as const).map(f => (
@@ -392,7 +404,7 @@ export default function AdminPage() {
                             </td>
                             <td className="px-3 py-3 text-gray-600 text-xs whitespace-nowrap max-w-[120px] truncate">{row.product || '-'}</td>
                             <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{row.keyword}</td>
-                            <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{row.tab || '-'}</td>
+                            <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{row.tab_type || '-'}</td>
                             <td className="px-3 py-3 max-w-[160px]">
                               {row.blog_url
                                 ? <a href={row.blog_url} target="_blank" rel="noreferrer" className="text-blue-500 text-xs hover:underline truncate block max-w-[150px]">{row.blog_url}</a>
@@ -417,7 +429,7 @@ export default function AdminPage() {
                                 : <span className="text-gray-300 text-xs">-</span>}
                             </td>
                             <td className="px-3 py-3 whitespace-nowrap">
-                              <button onClick={() => { setEditId(row.id); setEdit({ keyword: row.keyword, product: row.product || '', blog_url: row.blog_url || '', hwaseon_url: row.hwaseon_url || '', tab: row.tab || '', status: row.status, brand: row.brand || '아모스' }) }}
+                              <button onClick={() => { setEditId(row.id); setEdit({ keyword: row.keyword, product: row.product || '', blog_url: row.blog_url || '', hwaseon_url: row.hwaseon_url || '', tab_type: row.tab_type || '', status: row.status, brand: row.brand || '아모스' }) }}
                                 className="text-xs text-gray-400 hover:text-gray-700 mr-2">수정</button>
                               <button onClick={() => del(row.id, row.keyword)}
                                 className="text-xs text-gray-300 hover:text-red-500">×</button>
@@ -445,7 +457,7 @@ export default function AdminPage() {
                       </td>
                     ))}
                     <td className="px-2 py-2">
-                      <input value={newRow.tab} onChange={e => setNew(p => ({ ...p, tab: e.target.value }))}
+                      <input value={newRow.tab_type} onChange={e => setNew(p => ({ ...p, tab_type: e.target.value }))}
                         placeholder="노출탭"
                         className="border border-gray-300 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-400" />
                     </td>

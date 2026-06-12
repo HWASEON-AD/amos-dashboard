@@ -7,12 +7,12 @@ interface Exposure { date: string; is_exposed: boolean }
 interface Post {
   id: string; keyword: string; product: string | null
   blog_url: string | null; hwaseon_url: string | null
-  tab: string | null; status: string; brand: string | null
+  tab_type: string | null; status: string; brand: string | null
   amos_daily_exposure: Exposure[]
 }
 interface Capture {
   id: string; batch_id: string; keyword: string; product: string | null
-  tab: string | null; is_exposed: boolean; image_url: string; created_at: string
+  tab_type: string | null; is_exposed: boolean; image_url: string; created_at: string
 }
 
 function getCode(url: string | null) {
@@ -358,7 +358,7 @@ export default function Home() {
                 </div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mb-5">
                   <div><span className="text-gray-400 text-xs block">제품</span>{selectedPost.product || '-'}</div>
-                  <div><span className="text-gray-400 text-xs block">노출탭</span>{selectedPost.tab || '-'}</div>
+                  <div><span className="text-gray-400 text-xs block">노출탭</span>{selectedPost.tab_type || '-'}</div>
                   <div><span className="text-gray-400 text-xs block">노출일수</span>{(selectedPost.amos_daily_exposure || []).filter(e => e.is_exposed).length}일</div>
                   <div><span className="text-gray-400 text-xs block">총 클릭수</span>{clicks[selectedPost.id] != null ? clicks[selectedPost.id].toLocaleString() : '-'}</div>
                 </div>
@@ -421,8 +421,8 @@ export default function Home() {
                   <div className="p-2">
                     <div className="text-xs font-medium text-gray-800 truncate">{c.keyword}</div>
                     {c.product && <div className="text-xs text-gray-500 truncate">{c.product}</div>}
-                    {c.tab && (
-                      <span className={`mt-1 inline-block text-xs px-1.5 py-0.5 rounded ${c.is_exposed ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-600'}`}>{c.tab}</span>
+                    {c.tab_type && (
+                      <span className={`mt-1 inline-block text-xs px-1.5 py-0.5 rounded ${c.is_exposed ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-600'}`}>{c.tab_type}</span>
                     )}
                   </div>
                 </div>

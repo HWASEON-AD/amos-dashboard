@@ -12,13 +12,13 @@ export async function GET() {
 
   const { data: exposures } = await supabaseAdmin
     .from('amos_daily_exposure')
-    .select('post_id, date, is_exposed, created_at')
+    .select('post_id, date')
 
-  // 포스트별 노출 기록 합치기
-  const exposureMap: Record<string, { date: string; is_exposed: boolean; created_at: string }[]> = {}
+  // 포스트별 노출 기록 합치기 (presence = 노출, is_exposed는 항상 true)
+  const exposureMap: Record<string, { date: string; is_exposed: boolean }[]> = {}
   for (const e of exposures || []) {
     if (!exposureMap[e.post_id]) exposureMap[e.post_id] = []
-    exposureMap[e.post_id].push({ date: e.date, is_exposed: e.is_exposed, created_at: e.created_at })
+    exposureMap[e.post_id].push({ date: e.date, is_exposed: true })
   }
 
   const result = (posts || []).map(p => ({
@@ -31,7 +31,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const { keyword, product, blog_url, hwaseon_url, tab, brand } = body
+  const { keyword, product, blog_url, hwaseon_url, tab, tab_type, brand } = body
 
   if (!keyword) return NextResponse.json({ error: '키워드 필수' }, { status: 400 })
 
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
       product: product || null,
       blog_url: blog_url || null,
       hwaseon_url: hwaseon_url || null,
-      tab: tab || null,
+      tab_type: tab_type || tab || null,
       brand: brand || '아모스',
       status: '미노출',
     })

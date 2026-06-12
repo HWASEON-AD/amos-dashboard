@@ -4,7 +4,7 @@ import { supabaseAdmin } from '@/lib/supabase'
 export async function POST(req: NextRequest) {
   const body = await req.json()
   const { exposures } = body as {
-    exposures: { keyword: string; product: string; brand: string; date: string; is_exposed: boolean }[]
+    exposures: { keyword: string; product: string; brand: string; date: string; is_exposed?: boolean }[]
   }
 
   if (!exposures?.length) return NextResponse.json({ count: 0 })
@@ -19,19 +19,25 @@ export async function POST(req: NextRequest) {
     postMap.set(key, p.id)
   }
 
-  const records: { post_id: string; date: string; is_exposed: boolean }[] = []
+  // 노출일만 삽입 (presence = 노출)
+  const seen = new Set<string>()
+  const records: { post_id: string; date: string }[] = []
   for (const e of exposures) {
+    if (e.is_exposed === false) continue // 미노출은 기록 안 함
     const key = `${e.keyword}|||${e.product ?? ''}|||${e.brand ?? '아모스'}`
     const postId = postMap.get(key)
     if (!postId) continue
-    records.push({ post_id: postId, date: e.date, is_exposed: e.is_exposed })
+    const uniq = `${postId}|||${e.date}`
+    if (seen.has(uniq)) continue
+    seen.add(uniq)
+    records.push({ post_id: postId, date: e.date })
   }
 
-  if (!records.length) return NextResponse.json({ count: 0, note: '매칭된 키워드 없음' })
+  if (!records.length) return NextResponse.json({ count: 0, note: '노출 기록 없음' })
 
   const { error } = await supabaseAdmin
     .from('amos_daily_exposure')
-    .upsert(records, { onConflict: 'post_id,date' })
+    .upsert(records, { onConflict: 'post_id,date', ignoreDuplicates: true })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ count: records.length })
