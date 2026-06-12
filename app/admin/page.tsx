@@ -243,7 +243,7 @@ export default function AdminPage() {
                   📥 양식 다운로드
                 </button>
                 <a href="/api/export-excel" className="px-3 py-1.5 rounded text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200">
-                  📤 현재 데이터 다운로드 (시트1=키워드, 시트2=노출기록)
+                  📤 현재 데이터 다운로드 (단일 시트)
                 </a>
               </div>
             </div>
