@@ -158,7 +158,7 @@ def parse_url(url: str) -> dict:
     return result
 
 
-# ── scraper.py에서 그대로 가져온 캡처 로직 ────────────────────
+# ── ayunche-naver-capture/scraper.py 캡처 로직 그대로 ─────────
 
 DEVICE_WIDTH = 390
 MAX_SCROLL = 3
@@ -185,7 +185,7 @@ def _get_font(size: int = 16):
 
 
 def _find_section_for_link(link_element):
-    """매칭된 링크로부터 상위 섹션 컨테이너 탐색 — scraper.py 그대로"""
+    """매칭된 링크로부터 상위 섹션 컨테이너 탐색"""
     xpaths = [
         "ancestor::div[contains(@class,'api_subject_bx')][1]",
         "ancestor::div[contains(@class,'_fe_r')][1]",
@@ -201,8 +201,29 @@ def _find_section_for_link(link_element):
     return None
 
 
+def _find_post_element(driver, link_element):
+    """
+    DOM을 거슬러 올라가 개별 포스팅 카드 요소를 반환한다.
+    ayunche-naver-capture/scraper.py _find_post_element() 그대로.
+    """
+    return driver.execute_script("""
+        var el = arguments[0];
+        while (el && el !== document.body) {
+            var parent = el.parentElement;
+            if (!parent) break;
+            var r = el.getBoundingClientRect();
+            var pr = parent.getBoundingClientRect();
+            if (r.height >= 80 && pr.height > 0 && r.height < pr.height * 0.6) {
+                return el;
+            }
+            el = parent;
+        }
+        return arguments[0];
+    """, link_element)
+
+
 def _match_url(driver, url: str):
-    """3단계 URL 매칭 — scraper.py match_url() 그대로"""
+    """3단계 URL 매칭"""
     parsed = parse_url(url)
     post_no = parsed["post_no"]
     blog_id = parsed["id"]
@@ -216,9 +237,7 @@ def _match_url(driver, url: str):
     except Exception:
         return None, None
 
-    stage1 = None
-    stage2 = None
-    stage3 = None
+    stage1 = stage2 = stage3 = None
 
     for link in links:
         try:
@@ -253,7 +272,7 @@ def _match_url(driver, url: str):
 
 
 def _scroll_and_find(driver, url: str):
-    """스크롤하며 URL 매칭 — scraper.py scroll_and_find() 그대로"""
+    """스크롤하며 URL 매칭"""
     link, section = _match_url(driver, url)
     if link is not None and section is not None:
         return link, section
@@ -270,50 +289,70 @@ def _scroll_and_find(driver, url: str):
     return None, None
 
 
-def _crop_and_overlay(driver, section_element, link_element, keyword: str) -> bytes | None:
+def _capture_with_css_border(driver, link_element, keyword: str) -> bytes | None:
     """
-    섹션 크롭 (scraper.py crop_capture 로직 그대로) +
-    빨간 테두리 + 키워드 텍스트 PIL 오버레이 후 bytes 반환
+    ayunche-naver-capture/scraper.py crop_capture() 그대로:
+    1. 링크 화면 중앙 스크롤
+    2. 포스팅 카드 요소 탐색 (_find_post_element)
+    3. CSS overlay div (z-index:999999, border:2px solid #FF0000) 주입
+    4. 전체 뷰포트 스크린샷 → 브라우저가 빨간테두리 직접 렌더링
+    5. overlay 제거
+    6. PIL로 상단 키워드 텍스트만 추가
     """
+    # 1. 링크 화면 중앙으로 스크롤
     try:
-        target = section_element if section_element is not None else link_element
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'})", target)
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'})", link_element)
         time.sleep(0.5)
     except Exception:
         pass
 
+    # 2. 포스팅 카드 요소 탐색
+    try:
+        post_el = _find_post_element(driver, link_element)
+    except Exception:
+        post_el = link_element
+
+    # 3. CSS overlay div 주입 (z-index:999999, 빨간 테두리)
+    overlay = None
+    try:
+        overlay = driver.execute_script("""
+            var r = arguments[0].getBoundingClientRect();
+            var div = document.createElement('div');
+            div.style.cssText = [
+                'position:fixed',
+                'pointer-events:none',
+                'z-index:999999',
+                'border:2px solid #FF0000',
+                'box-sizing:border-box',
+                'left:' + r.left + 'px',
+                'top:' + r.top + 'px',
+                'width:' + r.width + 'px',
+                'height:' + r.height + 'px'
+            ].join(';');
+            document.body.appendChild(div);
+            return div;
+        """, post_el)
+    except Exception:
+        pass
+
+    # 4. 전체 뷰포트 스크린샷 (CSS overlay가 이미지에 직접 렌더링됨)
     screenshot_bytes = driver.get_screenshot_as_png()
+
+    # 5. overlay 제거
+    try:
+        if overlay:
+            driver.execute_script("arguments[0].remove();", overlay)
+    except Exception:
+        pass
+
+    # 6. PIL로 상단 키워드 텍스트 추가
     img = Image.open(io.BytesIO(screenshot_bytes))
-
-    # ── crop_capture() 크롭 로직 그대로 ──
-    if section_element is not None:
-        try:
-            rect = driver.execute_script(
-                "return arguments[0].getBoundingClientRect();", section_element
-            )
-            top = max(0, int(rect["y"]) - 10)
-            bottom = min(img.height, int(rect["y"] + rect["height"]) + 20)
-            right = min(img.width, DEVICE_WIDTH)
-            if bottom > top and right > 0:
-                img = img.crop((0, top, right, bottom))
-        except Exception as e:
-            log(f"  크롭 실패, 전체화면 사용: {str(e)[:50]}")
-
-    w, h = img.size
     draw = ImageDraw.Draw(img)
+    w = img.width
     font = _get_font(16)
-
-    # 키워드 텍스트 (상단 다크 배경)
     text_h = 30
     draw.rectangle([0, 0, w, text_h], fill=(30, 30, 30))
     draw.text((8, 7), keyword, fill=(255, 255, 255), font=font)
-
-    # 빨간 테두리 (HIGHLIGHT_COLOR = FF0000)
-    border = 2
-    draw.rectangle(
-        [border, text_h + border, w - border - 1, h - border - 1],
-        outline=(255, 0, 0), width=border
-    )
 
     buf = io.BytesIO()
     img.save(buf, format='PNG')
@@ -323,7 +362,7 @@ def _crop_and_overlay(driver, section_element, link_element, keyword: str) -> by
 # ── 노출 확인 ──────────────────────────────────────────────────
 
 def check_exposed(driver, keyword: str, blog_url: str) -> tuple[bool, bytes | None]:
-    """네이버 모바일 검색 → URL 매칭(scraper.py 로직) → 노출 여부 + 캡처 반환"""
+    """네이버 모바일 검색 → URL 매칭 → 노출 여부 + 전체화면+CSS빨간테두리 캡처 반환"""
     try:
         driver.get(f"https://m.search.naver.com/search.naver?query={urllib.parse.quote(keyword)}")
         time.sleep(SCROLL_PAUSE_SEC)
@@ -336,7 +375,7 @@ def check_exposed(driver, keyword: str, blog_url: str) -> tuple[bool, bytes | No
     if link is None:
         return False, None
 
-    img_bytes = _crop_and_overlay(driver, section, link, keyword)
+    img_bytes = _capture_with_css_border(driver, link, keyword)
     return True, img_bytes
 
 
