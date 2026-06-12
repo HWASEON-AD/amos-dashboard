@@ -398,7 +398,7 @@ export default function Home() {
                     {/* 기준선 */}
                     <div className="absolute left-0 right-0 bg-gray-100 rounded-full" style={{ top: 14, height: 2 }} />
                     {chartData.map((d, i) => {
-                      const showLabel = i === 0 || i === chartData.length - 1 || i % 7 === 0
+                      const showLabel = i === 0 || i % 7 === 0
                       const x = i * 22 + 11
                       return (
                         <div key={i} className="absolute flex flex-col items-center" style={{ left: x - 8, top: 0, width: 16 }}
