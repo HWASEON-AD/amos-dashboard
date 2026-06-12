@@ -43,7 +43,7 @@ function CapGrid({ caps, onPreview }: { caps: DailyCapture[]; onPreview: (url: s
       {caps.map(c => (
         <div key={c.id} onClick={() => onPreview(c.image_url)}
           className="bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow">
-          <img src={c.image_url} alt={c.keyword} className="w-full aspect-[9/16] object-cover" loading="lazy" />
+          <img src={c.image_url} alt={c.keyword} className="w-full object-contain bg-gray-50" loading="lazy" />
           <div className="p-2">
             <div className="text-xs font-medium text-gray-800 truncate">{c.keyword}</div>
             {c.product && <div className="text-xs text-gray-500 truncate">{c.product}</div>}
