@@ -393,7 +393,7 @@ export default function AdminPage() {
                           <>
                             <td className="px-3 py-3 text-gray-400 text-xs">{i + 1}</td>
                             <td className="px-3 py-3">
-                              <span className={`px-2 py-0.5 text-xs rounded font-medium ${row.brand === '아윤체' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
+                              <span className={`px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap ${row.brand === '아윤체' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
                                 {row.brand || '아모스'}
                               </span>
                             </td>
