@@ -291,28 +291,24 @@ def _scroll_and_find(driver, url: str):
 
 def _capture_with_css_border(driver, link_element, keyword: str) -> bytes | None:
     """
-    ayunche-naver-capture/scraper.py crop_capture() 그대로:
-    1. 링크 화면 중앙 스크롤
-    2. 포스팅 카드 요소 탐색 (_find_post_element)
-    3. CSS overlay div (z-index:999999, border:2px solid #FF0000) 주입
-    4. 전체 뷰포트 스크린샷 → 브라우저가 빨간테두리 직접 렌더링
-    5. overlay 제거
-    6. PIL로 상단 키워드 텍스트만 추가
+    포스팅 카드에 CSS 빨간테두리 주입 후 전체 뷰포트 캡처
+    - 섹션이 화면 상단에 보이도록 스크롤 (block:'start')
+    - 텍스트 오버레이 없음
     """
-    # 1. 링크 화면 중앙으로 스크롤
-    try:
-        driver.execute_script("arguments[0].scrollIntoView({block:'center'})", link_element)
-        time.sleep(0.5)
-    except Exception:
-        pass
-
-    # 2. 포스팅 카드 요소 탐색
+    # 1. 포스팅 카드 요소 탐색
     try:
         post_el = _find_post_element(driver, link_element)
     except Exception:
         post_el = link_element
 
-    # 3. CSS overlay div 주입 (z-index:999999, 빨간 테두리)
+    # 2. 섹션 상단이 뷰포트 상단에 오도록 스크롤
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block:'start'})", post_el)
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+    # 3. CSS overlay div 주입 (position:fixed, 빨간 테두리)
     overlay = None
     try:
         overlay = driver.execute_script("""
@@ -322,7 +318,7 @@ def _capture_with_css_border(driver, link_element, keyword: str) -> bytes | None
                 'position:fixed',
                 'pointer-events:none',
                 'z-index:999999',
-                'border:2px solid #FF0000',
+                'border:3px solid #FF0000',
                 'box-sizing:border-box',
                 'left:' + r.left + 'px',
                 'top:' + r.top + 'px',
@@ -335,7 +331,7 @@ def _capture_with_css_border(driver, link_element, keyword: str) -> bytes | None
     except Exception:
         pass
 
-    # 4. 전체 뷰포트 스크린샷 (CSS overlay가 이미지에 직접 렌더링됨)
+    # 4. 뷰포트 전체 스크린샷
     screenshot_bytes = driver.get_screenshot_as_png()
 
     # 5. overlay 제거
@@ -345,18 +341,7 @@ def _capture_with_css_border(driver, link_element, keyword: str) -> bytes | None
     except Exception:
         pass
 
-    # 6. PIL로 상단 키워드 텍스트 추가
-    img = Image.open(io.BytesIO(screenshot_bytes))
-    draw = ImageDraw.Draw(img)
-    w = img.width
-    font = _get_font(16)
-    text_h = 30
-    draw.rectangle([0, 0, w, text_h], fill=(30, 30, 30))
-    draw.text((8, 7), keyword, fill=(255, 255, 255), font=font)
-
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    return buf.getvalue()
+    return screenshot_bytes
 
 
 # ── 노출 확인 ──────────────────────────────────────────────────
