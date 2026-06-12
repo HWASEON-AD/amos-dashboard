@@ -17,7 +17,7 @@ from datetime import date, datetime
 import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import io
 
 # ── 환경 변수 ──────────────────────────────────────────────────
@@ -157,10 +157,94 @@ def parse_url(url: str) -> dict:
     return result
 
 
+# ── 캡처 이미지 생성 ───────────────────────────────────────────
+
+def _load_font(size: int = 16):
+    """OS별 한국어 폰트 로드 (없으면 기본 폰트)"""
+    paths = [
+        "C:/Windows/Fonts/malgun.ttf",
+        "C:/Windows/Fonts/malgunbd.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJKkr-Regular.otf",
+    ]
+    for path in paths:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def find_section(link_element, driver):
+    """링크 엘리먼트의 상위 섹션 컨테이너 탐색 (api_subject_bx → _fe_r → section 순)"""
+    xpaths = [
+        "ancestor::div[contains(@class,'api_subject_bx')][1]",
+        "ancestor::div[contains(@class,'_fe_r')][1]",
+        "ancestor::section[1]",
+    ]
+    for xp in xpaths:
+        try:
+            el = link_element.find_element(By.XPATH, xp)
+            if el:
+                return el
+        except Exception:
+            continue
+    return None
+
+
+def make_capture_bytes(driver, link_element, section_element, keyword: str) -> bytes | None:
+    """섹션 크롭 + 키워드 텍스트 상단 오버레이 + 빨간 테두리 적용 이미지 반환"""
+    try:
+        target = section_element or link_element
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'})", target)
+        time.sleep(0.5)
+
+        screenshot = driver.get_screenshot_as_png()
+        img = Image.open(io.BytesIO(screenshot))
+
+        # 섹션 bounding box로 크롭
+        if section_element:
+            rect = driver.execute_script(
+                "return arguments[0].getBoundingClientRect();", section_element
+            )
+            top = max(0, int(rect["y"]) - 8)
+            bottom = min(img.height, int(rect["y"] + rect["height"]) + 16)
+            right = img.width
+            if bottom > top:
+                img = img.crop((0, top, right, bottom))
+
+        w, h = img.size
+        draw = ImageDraw.Draw(img)
+        font = _load_font(16)
+
+        # 상단 다크 배경 + 키워드 텍스트
+        text_h = 30
+        draw.rectangle([0, 0, w, text_h], fill=(30, 30, 30))
+        draw.text((8, 7), keyword, fill=(255, 255, 255), font=font)
+
+        # 빨간 테두리 (텍스트 영역 아래부터)
+        border = 3
+        draw.rectangle(
+            [border, text_h + border, w - border - 1, h - border - 1],
+            outline=(255, 0, 0), width=border
+        )
+
+        buf = io.BytesIO()
+        img.save(buf, format='PNG')
+        return buf.getvalue()
+    except Exception as e:
+        log(f"  캡처 이미지 생성 오류: {str(e)[:60]}")
+        try:
+            return driver.get_screenshot_as_png()
+        except Exception:
+            return None
+
+
 # ── 노출 확인 ──────────────────────────────────────────────────
 
 def check_exposed(driver, keyword: str, blog_url: str) -> tuple[bool, bytes | None]:
-    """네이버 모바일 검색 → URL 매칭 → 노출 여부 + 캡처 반환"""
+    """네이버 모바일 검색 → URL 매칭 → 노출 여부 + 크롭+오버레이 캡처 반환"""
     try:
         driver.get(f"https://m.search.naver.com/search.naver?query={urllib.parse.quote(keyword)}")
         time.sleep(2)
@@ -191,19 +275,14 @@ def check_exposed(driver, keyword: str, blog_url: str) -> tuple[bool, bytes | No
         driver.execute_script("window.scrollBy(0, 1200)")
         time.sleep(1.5)
 
-    img_bytes = None
-    if found_link:
-        try:
-            driver.execute_script("arguments[0].scrollIntoView({block:'center'})", found_link)
-            time.sleep(0.5)
-        except Exception:
-            pass
-    try:
-        img_bytes = driver.get_screenshot_as_png()
-    except Exception:
-        pass
+    if not found_link:
+        return False, None
 
-    return (found_link is not None), img_bytes
+    # 섹션 탐색 → 크롭+오버레이 캡처
+    section = find_section(found_link, driver)
+    img_bytes = make_capture_bytes(driver, found_link, section, keyword)
+
+    return True, img_bytes
 
 
 # ── hwaseon-image 트래킹 ──────────────────────────────────────
