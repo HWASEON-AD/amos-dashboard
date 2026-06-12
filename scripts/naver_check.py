@@ -85,8 +85,8 @@ def save_exposure(post_id: str, is_exposed: bool):
     )
 
 
-def upload_screenshot(post_id: str, img_bytes: bytes) -> bool:
-    """Supabase Storage 버킷 'amos-captures'에 캡처 업로드"""
+def upload_screenshot(post_id: str, img_bytes: bytes) -> str | None:
+    """Supabase Storage 'amos-captures'에 업로드, 성공 시 public URL 반환"""
     path = f'captures/{TODAY}/{post_id}.png'
     r = requests.post(
         f'{SUPABASE_URL}/storage/v1/object/amos-captures/{path}',
@@ -98,7 +98,28 @@ def upload_screenshot(post_id: str, img_bytes: bytes) -> bool:
         data=img_bytes,
         timeout=15
     )
-    return r.ok
+    if r.ok:
+        return f'{SUPABASE_URL}/storage/v1/object/public/amos-captures/{path}'
+    return None
+
+
+def save_capture(post_id: str, brand: str | None, keyword: str, product: str | None, image_url: str):
+    """amos_daily_captures에 노출 캡처 저장 (upsert)"""
+    r = requests.post(
+        f'{SUPABASE_URL}/rest/v1/amos_daily_captures',
+        headers={**SB_HEADERS, 'Prefer': 'resolution=merge-duplicates'},
+        json={
+            'post_id': post_id,
+            'date': TODAY,
+            'brand': brand,
+            'keyword': keyword,
+            'product': product,
+            'image_url': image_url,
+        },
+        timeout=10
+    )
+    if not r.ok:
+        log(f"  캡처 DB 저장 실패: {r.status_code}")
 
 
 # ── Selenium 드라이버 ──────────────────────────────────────────
@@ -334,8 +355,18 @@ def main():
                     save_view_count(post_id, view_count)
                     log(f"  카페 조회수: {view_count}")
 
-            if img_bytes:
-                if not upload_screenshot(post_id, img_bytes):
+            # 노출된 경우에만 캡처 저장
+            if is_exposed and img_bytes:
+                image_url = upload_screenshot(post_id, img_bytes)
+                if image_url:
+                    save_capture(
+                        post_id=post_id,
+                        brand=post.get('brand'),
+                        keyword=kw,
+                        product=post.get('product'),
+                        image_url=image_url
+                    )
+                else:
                     fname = re.sub(r'[\\/:*?"<>|]', '_', kw)
                     with open(f'captures/{fname}.png', 'wb') as f:
                         f.write(img_bytes)

@@ -9,10 +9,10 @@ interface Post {
   tab_type: string | null; status: string; brand: string | null
   amos_daily_exposure: Exposure[]
 }
-interface Capture {
-  id: string; batch_id: string; slot: string; keyword: string; product: string | null
-  expected_tab: string | null; section_name: string | null; tab_match: boolean
-  is_error: boolean; image_url: string; captured_at: string; brand: string
+interface DailyCapture {
+  id: string; post_id: string; date: string
+  brand: string | null; keyword: string; product: string | null
+  image_url: string
 }
 
 function getCode(url: string | null) {
@@ -37,13 +37,7 @@ function daysIn(start: string, end: string): string[] {
   return days
 }
 
-function batchLabel(id: string) {
-  const [date, slot] = id.split('_')
-  const m: Record<string, string> = { morning: '오전', afternoon: '오후', evening: '저녁' }
-  return `${date?.slice(0,4)}-${date?.slice(4,6)}-${date?.slice(6,8)} ${m[slot] || slot || ''}`
-}
-
-function CapGrid({ caps, onPreview }: { caps: Capture[]; onPreview: (url: string) => void }) {
+function CapGrid({ caps, onPreview }: { caps: DailyCapture[]; onPreview: (url: string) => void }) {
   return (
     <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-3">
       {caps.map(c => (
@@ -53,9 +47,6 @@ function CapGrid({ caps, onPreview }: { caps: Capture[]; onPreview: (url: string
           <div className="p-2">
             <div className="text-xs font-medium text-gray-800 truncate">{c.keyword}</div>
             {c.product && <div className="text-xs text-gray-500 truncate">{c.product}</div>}
-            {c.section_name && (
-              <span className={`mt-1 inline-block text-xs px-1.5 py-0.5 rounded ${c.tab_match ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-600'}`}>{c.section_name}</span>
-            )}
           </div>
         </div>
       ))}
@@ -66,7 +57,6 @@ function CapGrid({ caps, onPreview }: { caps: Capture[]; onPreview: (url: string
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'exposure' | 'captures'>('exposure')
   const [posts, setPosts] = useState<Post[]>([])
-  const [captures, setCaptures] = useState<Capture[]>([])
   const [loading, setLoading] = useState(true)
   const [capLoading, setCapLoading] = useState(false)
   // 선택 상태: 제품 선택 vs 키워드 선택 분리
@@ -78,7 +68,8 @@ export default function Home() {
   const [customStart, setCustomStart] = useState(toStr(new Date(Date.now() - 29 * 86400000)))
   const [customEnd, setCustomEnd] = useState(toStr(new Date()))
   const [clicks, setClicks] = useState<Record<string, number>>({})
-  const [capBatch, setCapBatch] = useState('')
+  const [capDate, setCapDate] = useState('')
+  const [dailyCaptures, setDailyCaptures] = useState<DailyCapture[]>([])
   const [capBrand, setCapBrand] = useState<'전체' | '아모스' | '아윤채'>('전체')
   const [capPreview, setCapPreview] = useState<string | null>(null)
 
@@ -102,15 +93,20 @@ export default function Home() {
 
   useEffect(() => { load() }, [load])
 
-  useEffect(() => {
-    if (activeTab !== 'captures' || captures.length > 0) return
+  const loadCaptures = useCallback((date?: string) => {
     setCapLoading(true)
-    fetch('/api/ayunche-captures').then(r => r.json()).then(d => {
-      const list = Array.isArray(d) ? d : []
-      setCaptures(list)
-      if (list.length > 0) setCapBatch(list.sort((a: Capture, b: Capture) => b.batch_id.localeCompare(a.batch_id))[0].batch_id)
+    const url = date ? `/api/captures?date=${date}` : '/api/captures'
+    fetch(url).then(r => r.json()).then(d => {
+      setDailyCaptures(d.records || [])
+      if (!date && d.date) setCapDate(d.date)
+      else if (date) setCapDate(date)
     }).finally(() => setCapLoading(false))
-  }, [activeTab, captures.length])
+  }, [])
+
+  useEffect(() => {
+    if (activeTab !== 'captures') return
+    if (!capDate) loadCaptures()
+  }, [activeTab, capDate, loadCaptures])
 
   // 3-level: 브랜드 > product > keyword
   const brandProductMap: Record<string, Record<string, Post[]>> = {}
@@ -174,12 +170,9 @@ export default function Home() {
     }
   }
 
-  const batches = Array.from(new Set(captures.map(c => c.batch_id))).sort((a, b) => b.localeCompare(a))
-  const activeBatch = capBatch || batches[0] || ''
-  const batchCaps = captures.filter(c => c.batch_id === activeBatch)
-  const amosCaps = batchCaps.filter(c => c.brand === '아모스')
-  const ayuncheCaps = batchCaps.filter(c => c.brand === '아윤채')
-  const filteredCaps = capBrand === '전체' ? batchCaps : capBrand === '아모스' ? amosCaps : ayuncheCaps
+  const amosCaps = dailyCaptures.filter(c => c.brand === '아모스')
+  const ayuncheCaps = dailyCaptures.filter(c => c.brand === '아윤채')
+  const filteredCaps = capBrand === '전체' ? dailyCaptures : capBrand === '아모스' ? amosCaps : ayuncheCaps
 
   const heatmapLabel = selectedPost
     ? selectedPost.keyword
@@ -435,8 +428,11 @@ export default function Home() {
       ) : (
         /* 캡처 탭 */
         <div className="flex-1 overflow-y-auto p-5 bg-gray-50">
-          {/* 헤더: 브랜드 드롭다운 + 배치 선택 */}
-          <div className="flex items-center justify-between mb-4 gap-3">
+          {/* 헤더: 날짜 선택 + 브랜드 필터 */}
+          <div className="flex items-center gap-3 mb-4 flex-wrap">
+            <input type="date" value={capDate}
+              onChange={e => loadCaptures(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" />
             <div className="flex gap-2">
               {(['전체','아모스','아윤채'] as const).map(b => (
                 <button key={b} onClick={() => setCapBrand(b)}
@@ -445,41 +441,33 @@ export default function Home() {
                 </button>
               ))}
             </div>
-            <select value={activeBatch} onChange={e => setCapBatch(e.target.value)}
-              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none">
-              {batches.map(b => <option key={b} value={b}>{batchLabel(b)}</option>)}
-            </select>
           </div>
           {capLoading ? (
             <div className="text-center py-20 text-gray-400">로딩 중...</div>
           ) : capBrand === '전체' ? (
-            /* 전체: 아모스(위) + 아윤채(아래) 분리 */
             <div className="space-y-8">
-              <div>
-                <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                  아모스
-                  <span className="text-xs font-normal text-gray-400">{amosCaps.length}건</span>
-                </h3>
-                {amosCaps.length === 0 ? (
-                  <div className="text-center py-10 text-gray-400 text-sm bg-white rounded-xl border border-gray-200">캡처 데이터 없음</div>
-                ) : (
+              {amosCaps.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                    아모스 <span className="text-xs font-normal text-gray-400">{amosCaps.length}건</span>
+                  </h3>
                   <CapGrid caps={amosCaps} onPreview={setCapPreview} />
-                )}
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
-                  아윤채
-                  <span className="text-xs font-normal text-gray-400">{ayuncheCaps.length}건</span>
-                </h3>
-                {ayuncheCaps.length === 0 ? (
-                  <div className="text-center py-10 text-gray-400 text-sm bg-white rounded-xl border border-gray-200">캡처 데이터 없음</div>
-                ) : (
+                </div>
+              )}
+              {ayuncheCaps.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                    아윤채 <span className="text-xs font-normal text-gray-400">{ayuncheCaps.length}건</span>
+                  </h3>
                   <CapGrid caps={ayuncheCaps} onPreview={setCapPreview} />
-                )}
-              </div>
+                </div>
+              )}
+              {dailyCaptures.length === 0 && (
+                <div className="text-center py-20 text-gray-400 text-sm">해당 날짜 캡처 없음</div>
+              )}
             </div>
           ) : filteredCaps.length === 0 ? (
-            <div className="text-center py-20 text-gray-400">캡처 데이터 없음</div>
+            <div className="text-center py-20 text-gray-400 text-sm">해당 날짜 캡처 없음</div>
           ) : (
             <CapGrid caps={filteredCaps} onPreview={setCapPreview} />
           )}
