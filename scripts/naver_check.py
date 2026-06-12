@@ -52,7 +52,7 @@ def get_posts() -> list[dict]:
     """blog_url 있는 포스트 전체 조회 (상태 무관)"""
     r = requests.get(
         f'{SUPABASE_URL}/rest/v1/amos_posts'
-        '?select=id,keyword,blog_url,tab_type,brand,product'
+        '?select=id,keyword,blog_url,tab_type,brand,product,hwaseon_url'
         '&blog_url=not.is.null',
         headers=SB_HEADERS,
         timeout=10
@@ -185,6 +185,78 @@ def check_exposed(driver, keyword: str, blog_url: str) -> tuple[bool, bytes | No
     return (found_link is not None), img_bytes
 
 
+# ── hwaseon-image 트래킹 ──────────────────────────────────────
+
+HWASEON_IMAGE_BASE = 'https://hwaseon-image.com'
+
+def extract_hwaseon_image_ids(html: str) -> list:
+    """HTML에서 hwaseon-image.com 이미지 ID 추출 (3가지 패턴)"""
+    found = set()
+    # 패턴1: /image/<id>
+    for m in re.finditer(r'https?://hwaseon-image\.com/image/([a-zA-Z0-9_\-]+)', html):
+        found.add(m.group(1))
+    # 패턴2: /uploads/<id>.<ext>
+    for m in re.finditer(r'https?://hwaseon-image\.com/uploads/([a-zA-Z0-9_\-]+)\.[a-zA-Z]{2,5}', html):
+        found.add(m.group(1))
+    # 패턴3: URL 인코딩된 경우 (네이버 이미지 프록시)
+    for m in re.finditer(r'hwaseon-image\.com(?:%2F|/)(?:image|uploads)(?:%2F|/)([a-zA-Z0-9_\-]+)', html):
+        found.add(m.group(1))
+    return list(found)
+
+
+def get_hwaseon_image_views(image_id: str) -> int | None:
+    """hwaseon-image.com /image/:id/detail API로 조회수 가져오기 (인증 불필요)"""
+    try:
+        r = requests.get(
+            f'{HWASEON_IMAGE_BASE}/image/{image_id}/detail',
+            timeout=10
+        )
+        if r.ok:
+            return r.json().get('views', 0)
+    except Exception as e:
+        log(f"  hwaseon-image API 오류: {str(e)[:60]}")
+    return None
+
+
+def get_views_from_hwaseon_url(hwaseon_url: str) -> int | None:
+    """제품링크URL 방문 → hwaseon-image ID 추출 → 조회수 반환. 없으면 None."""
+    if not hwaseon_url:
+        return None
+    try:
+        headers = {
+            'User-Agent': (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/120.0.0.0 Safari/537.36'
+            )
+        }
+        # allow_redirects=True 로 단축URL 리다이렉트 자동 처리
+        r = requests.get(hwaseon_url, headers=headers, timeout=15, allow_redirects=True)
+        if not r.ok:
+            log(f"  제품링크 fetch 실패: {r.status_code}")
+            return None
+
+        html = r.text
+        ids = extract_hwaseon_image_ids(html)
+        if not ids:
+            log(f"  hwaseon-image 미발견 (URL-encoded 시도)")
+            # URL 디코딩 후 재시도
+            decoded = urllib.parse.unquote(html)
+            ids = extract_hwaseon_image_ids(decoded)
+
+        if not ids:
+            log(f"  hwaseon-image 없음 → 조회수 트래킹 불가")
+            return None
+
+        image_id = ids[0]
+        views = get_hwaseon_image_views(image_id)
+        log(f"  hwaseon-image id={image_id} → 조회수 {views}")
+        return views
+    except Exception as e:
+        log(f"  제품링크 접근 오류: {str(e)[:60]}")
+        return None
+
+
 # ── 카페 조회수 스크래핑 ────────────────────────────────────────
 
 def get_cafe_view_count(driver, blog_url: str) -> int | None:
@@ -247,9 +319,16 @@ def main():
 
             save_exposure(post_id, is_exposed)
 
-            # 카페 글이면 조회수 추가 수집
+            # hwaseon-image 조회수 트래킹 (제품링크URL이 있으면)
+            hwaseon_url = post.get('hwaseon_url')
+            if hwaseon_url:
+                views = get_views_from_hwaseon_url(hwaseon_url)
+                if views is not None:
+                    save_view_count(post_id, views)
+
+            # 카페 글이면 조회수 추가 수집 (hwaseon-image 없을 경우 fallback)
             parsed = parse_url(url)
-            if parsed['type'] == 'cafe':
+            if parsed['type'] == 'cafe' and not hwaseon_url:
                 view_count = get_cafe_view_count(driver, url)
                 if view_count is not None:
                     save_view_count(post_id, view_count)
