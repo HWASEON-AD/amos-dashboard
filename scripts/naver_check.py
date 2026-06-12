@@ -185,6 +185,39 @@ def check_exposed(driver, keyword: str, blog_url: str) -> tuple[bool, bytes | No
     return (found_link is not None), img_bytes
 
 
+# ── 카페 조회수 스크래핑 ────────────────────────────────────────
+
+def get_cafe_view_count(driver, blog_url: str) -> int | None:
+    """카페 포스트 실제 조회수 스크래핑"""
+    parsed = parse_url(blog_url)
+    if parsed['type'] != 'cafe':
+        return None
+    try:
+        driver.get(blog_url.replace('m.cafe.naver.com', 'cafe.naver.com'))
+        time.sleep(2)
+        html = driver.page_source
+        # 카페 조회수 패턴 (조회 N, 읽음 N 등)
+        m = re.search(r'조회\s*[:|]?\s*([\d,]+)', html)
+        if m:
+            return int(m.group(1).replace(',', ''))
+        m = re.search(r'"readCount"\s*:\s*(\d+)', html)
+        if m:
+            return int(m.group(1))
+    except Exception as e:
+        log(f"  카페 조회수 오류: {str(e)[:40]}")
+    return None
+
+
+def save_view_count(post_id: str, count: int):
+    """amos_posts.total_views 업데이트"""
+    requests.patch(
+        f'{SUPABASE_URL}/rest/v1/amos_posts?id=eq.{post_id}',
+        headers=SB_HEADERS,
+        json={'total_views': count},
+        timeout=10
+    )
+
+
 # ── 메인 ───────────────────────────────────────────────────────
 
 def main():
@@ -214,9 +247,16 @@ def main():
 
             save_exposure(post_id, is_exposed)
 
+            # 카페 글이면 조회수 추가 수집
+            parsed = parse_url(url)
+            if parsed['type'] == 'cafe':
+                view_count = get_cafe_view_count(driver, url)
+                if view_count is not None:
+                    save_view_count(post_id, view_count)
+                    log(f"  카페 조회수: {view_count}")
+
             if img_bytes:
                 if not upload_screenshot(post_id, img_bytes):
-                    # Storage 업로드 실패 → 로컬 저장 (GitHub Artifact로 보존)
                     fname = re.sub(r'[\\/:*?"<>|]', '_', kw)
                     with open(f'captures/{fname}.png', 'wb') as f:
                         f.write(img_bytes)

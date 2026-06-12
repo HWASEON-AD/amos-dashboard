@@ -384,22 +384,30 @@ export default function Home() {
                   <div><span className="text-gray-400 text-xs block">제품</span>{selectedPost.product || '-'}</div>
                   <div><span className="text-gray-400 text-xs block">노출탭</span>{selectedPost.tab_type || '-'}</div>
                   <div><span className="text-gray-400 text-xs block">노출일수</span>{(selectedPost.amos_daily_exposure || []).filter(e => e.is_exposed).length}일</div>
-                  <div><span className="text-gray-400 text-xs block">총 클릭수</span>{clicks[selectedPost.id] != null ? clicks[selectedPost.id].toLocaleString() : '-'}</div>
+                  <div><span className="text-gray-400 text-xs block">총 클릭수</span>
+                    {!selectedPost.hwaseon_url
+                      ? <span className="text-gray-400 text-xs">조회수 트래킹 불가<br/><span className="text-gray-300">(image호스팅 연결x)</span></span>
+                      : clicks[selectedPost.id] != null ? clicks[selectedPost.id].toLocaleString() : '-'}
+                  </div>
                 </div>
 
                 {/* 일별 노출 도표 — 노출된 날만 점 표시 */}
-                <h4 className="text-xs font-semibold text-gray-500 mb-2">일별 노출 현황</h4>
-                <div className="overflow-x-auto pb-1">
-                  <div className="flex items-end gap-px" style={{ minWidth: `${chartData.length * 18}px` }}>
+                <h4 className="text-xs font-semibold text-gray-500 mb-3">일별 노출 현황</h4>
+                <div className="overflow-x-auto pb-2">
+                  <div className="relative" style={{ minWidth: `${chartData.length * 22}px`, height: 56 }}>
+                    {/* 기준선 */}
+                    <div className="absolute left-0 right-0 bg-gray-100 rounded-full" style={{ top: 14, height: 2 }} />
                     {chartData.map((d, i) => {
-                      const showLabel = i === 0 || i === chartData.length - 1 || i % Math.ceil(chartData.length / 8) === 0
+                      const showLabel = i === 0 || i === chartData.length - 1 || i % 7 === 0
+                      const x = i * 22 + 11
                       return (
-                        <div key={i} className="flex flex-col items-center flex-shrink-0" style={{ width: 18 }}
+                        <div key={i} className="absolute flex flex-col items-center" style={{ left: x - 8, top: 0, width: 16 }}
                           title={`${d.date}: ${d.exposed ? '노출' : '미노출'}`}>
-                          <div className={`w-2.5 h-2.5 rounded-full mb-1 ${d.exposed ? 'bg-red-500' : 'invisible'}`} />
-                          <div className="h-px w-full bg-gray-100" />
+                          {d.exposed
+                            ? <div className="w-4 h-4 rounded-full bg-red-500 shadow-sm shadow-red-200 ring-2 ring-white" />
+                            : <div className="w-2 h-2 rounded-full bg-gray-200 mt-1" />}
                           {showLabel && (
-                            <span className="text-gray-400 mt-0.5" style={{ fontSize: 8, lineHeight: 1 }}>{d.date}</span>
+                            <span className="absolute text-gray-400 text-center whitespace-nowrap" style={{ top: 26, fontSize: 9 }}>{d.date}</span>
                           )}
                         </div>
                       )
