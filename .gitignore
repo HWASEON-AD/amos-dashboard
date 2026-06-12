@@ -37,3 +37,6 @@ next-env.d.ts
 
 .vercel
 scripts/run_sync.bat
+captures/
+*.xlsx
+claude_log_*.md
