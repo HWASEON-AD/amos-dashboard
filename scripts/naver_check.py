@@ -49,11 +49,10 @@ def log(msg: str):
 # ── Supabase 연동 ──────────────────────────────────────────────
 
 def get_posts() -> list[dict]:
-    """노출중 + blog_url 있는 포스트 전체 조회"""
+    """blog_url 있는 포스트 전체 조회 (상태 무관)"""
     r = requests.get(
         f'{SUPABASE_URL}/rest/v1/amos_posts'
-        '?select=id,keyword,blog_url,tab,brand,product'
-        '&status=eq.노출중'
+        '?select=id,keyword,blog_url,tab_type,brand,product'
         '&blog_url=not.is.null',
         headers=SB_HEADERS,
         timeout=10
@@ -65,15 +64,25 @@ def get_posts() -> list[dict]:
 
 
 def save_exposure(post_id: str, is_exposed: bool):
-    """amos_daily_exposure 오늘 날짜 upsert"""
-    r = requests.post(
-        f'{SUPABASE_URL}/rest/v1/amos_daily_exposure',
-        headers={**SB_HEADERS, 'Prefer': 'resolution=merge-duplicates'},
-        json={'post_id': post_id, 'date': TODAY, 'is_exposed': is_exposed},
+    """노출된 경우만 amos_daily_exposure에 INSERT, 상태도 업데이트"""
+    # 노출 기록 (row 존재 = 노출, is_exposed 컬럼 없음)
+    if is_exposed:
+        r = requests.post(
+            f'{SUPABASE_URL}/rest/v1/amos_daily_exposure',
+            headers={**SB_HEADERS, 'Prefer': 'resolution=ignore-duplicates'},
+            json={'post_id': post_id, 'date': TODAY},
+            timeout=10
+        )
+        if not r.ok:
+            log(f"  노출기록 저장 실패: {r.status_code}")
+    # amos_posts 상태 업데이트
+    new_status = '노출중' if is_exposed else '미노출'
+    requests.patch(
+        f'{SUPABASE_URL}/rest/v1/amos_posts?id=eq.{post_id}',
+        headers=SB_HEADERS,
+        json={'status': new_status},
         timeout=10
     )
-    if not r.ok:
-        log(f"  노출기록 저장 실패: {r.status_code}")
 
 
 def upload_screenshot(post_id: str, img_bytes: bytes) -> bool:
@@ -213,7 +222,7 @@ def main():
                         f.write(img_bytes)
 
             results.append({'keyword': kw, 'exposed': is_exposed})
-            log(f"  → {'✓ 노출중' if is_exposed else '✗ 미노출'}")
+            log(f"  -> {'O 노출중' if is_exposed else 'X 미노출'}")
             time.sleep(1)
     finally:
         driver.quit()
@@ -222,7 +231,9 @@ def main():
     log(f"\n완료: {exposed}/{len(results)} 노출 확인")
     print("\n=== 체크 결과 ===")
     for r in results:
-        print(f"{'✓' if r['exposed'] else '✗'} {r['keyword']}")
+        mark = 'O' if r['exposed'] else 'X'
+        kw = r['keyword'].encode('utf-8', errors='replace').decode('utf-8')
+        print(f"{mark} {kw}")
 
 
 if __name__ == '__main__':
