@@ -158,27 +158,34 @@ def parse_url(url: str) -> dict:
     return result
 
 
-# ── 캡처 이미지 생성 ───────────────────────────────────────────
+# ── scraper.py에서 그대로 가져온 캡처 로직 ────────────────────
 
-def _load_font(size: int = 16):
-    """OS별 한국어 폰트 로드 (없으면 기본 폰트)"""
-    paths = [
+DEVICE_WIDTH = 390
+MAX_SCROLL = 3
+SCROLL_PAUSE_SEC = 1.5
+SCROLL_AMOUNT_PX = 1200
+
+
+def _get_font(size: int = 16):
+    candidates = [
         "C:/Windows/Fonts/malgun.ttf",
         "C:/Windows/Fonts/malgunbd.ttf",
+        "C:/Windows/Fonts/NanumGothic.ttf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/noto-cjk/NotoSansCJKkr-Regular.otf",
     ]
-    for path in paths:
-        try:
-            return ImageFont.truetype(path, size)
-        except Exception:
-            continue
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
     return ImageFont.load_default()
 
 
-def find_section(link_element, driver):
-    """링크 엘리먼트의 상위 섹션 컨테이너 탐색 (api_subject_bx → _fe_r → section 순)"""
+def _find_section_for_link(link_element):
+    """매칭된 링크로부터 상위 섹션 컨테이너 탐색 — scraper.py 그대로"""
     xpaths = [
         "ancestor::div[contains(@class,'api_subject_bx')][1]",
         "ancestor::div[contains(@class,'_fe_r')][1]",
@@ -186,103 +193,150 @@ def find_section(link_element, driver):
     ]
     for xp in xpaths:
         try:
-            el = link_element.find_element(By.XPATH, xp)
-            if el:
-                return el
+            section = link_element.find_element(By.XPATH, xp)
+            if section is not None:
+                return section
         except Exception:
             continue
     return None
 
 
-def make_capture_bytes(driver, link_element, section_element, keyword: str) -> bytes | None:
-    """섹션 크롭 + 키워드 텍스트 상단 오버레이 + 빨간 테두리 적용 이미지 반환"""
+def _match_url(driver, url: str):
+    """3단계 URL 매칭 — scraper.py match_url() 그대로"""
+    parsed = parse_url(url)
+    post_no = parsed["post_no"]
+    blog_id = parsed["id"]
+    url_type = parsed["type"]
+
+    if not post_no:
+        return None, None
+
     try:
-        target = section_element or link_element
+        links = driver.find_elements(By.TAG_NAME, "a")
+    except Exception:
+        return None, None
+
+    stage1 = None
+    stage2 = None
+    stage3 = None
+
+    for link in links:
+        try:
+            href = link.get_attribute("href") or ""
+        except Exception:
+            continue
+        if not href:
+            continue
+
+        href_norm = href.replace("m.blog.naver.com", "blog.naver.com")
+        href_norm = href_norm.replace("m.cafe.naver.com", "cafe.naver.com")
+
+        if post_no not in href_norm:
+            continue
+
+        if blog_id and blog_id in href_norm:
+            stage1 = stage1 or link
+        if url_type == "blog" and "blog.naver.com" in href_norm:
+            stage2 = stage2 or link
+        elif url_type == "cafe" and "cafe.naver.com" in href_norm:
+            stage2 = stage2 or link
+        elif url_type == "cafe" and re.search(r"articleid=" + re.escape(post_no), href_norm, re.IGNORECASE):
+            stage2 = stage2 or link
+        stage3 = stage3 or link
+
+    matched = stage1 or stage2 or stage3
+    if matched is None:
+        return None, None
+
+    section = _find_section_for_link(matched)
+    return matched, section
+
+
+def _scroll_and_find(driver, url: str):
+    """스크롤하며 URL 매칭 — scraper.py scroll_and_find() 그대로"""
+    link, section = _match_url(driver, url)
+    if link is not None and section is not None:
+        return link, section
+
+    for _ in range(MAX_SCROLL):
+        driver.execute_script(f"window.scrollBy(0, {SCROLL_AMOUNT_PX});")
+        time.sleep(SCROLL_PAUSE_SEC)
+        link, section = _match_url(driver, url)
+        if link is not None and section is not None:
+            return link, section
+
+    if link is not None:
+        return link, None
+    return None, None
+
+
+def _crop_and_overlay(driver, section_element, link_element, keyword: str) -> bytes | None:
+    """
+    섹션 크롭 (scraper.py crop_capture 로직 그대로) +
+    빨간 테두리 + 키워드 텍스트 PIL 오버레이 후 bytes 반환
+    """
+    try:
+        target = section_element if section_element is not None else link_element
         driver.execute_script("arguments[0].scrollIntoView({block:'center'})", target)
         time.sleep(0.5)
+    except Exception:
+        pass
 
-        screenshot = driver.get_screenshot_as_png()
-        img = Image.open(io.BytesIO(screenshot))
+    screenshot_bytes = driver.get_screenshot_as_png()
+    img = Image.open(io.BytesIO(screenshot_bytes))
 
-        # 섹션 bounding box로 크롭
-        if section_element:
+    # ── crop_capture() 크롭 로직 그대로 ──
+    if section_element is not None:
+        try:
             rect = driver.execute_script(
                 "return arguments[0].getBoundingClientRect();", section_element
             )
-            top = max(0, int(rect["y"]) - 8)
-            bottom = min(img.height, int(rect["y"] + rect["height"]) + 16)
-            right = img.width
-            if bottom > top:
+            top = max(0, int(rect["y"]) - 10)
+            bottom = min(img.height, int(rect["y"] + rect["height"]) + 20)
+            right = min(img.width, DEVICE_WIDTH)
+            if bottom > top and right > 0:
                 img = img.crop((0, top, right, bottom))
+        except Exception as e:
+            log(f"  크롭 실패, 전체화면 사용: {str(e)[:50]}")
 
-        w, h = img.size
-        draw = ImageDraw.Draw(img)
-        font = _load_font(16)
+    w, h = img.size
+    draw = ImageDraw.Draw(img)
+    font = _get_font(16)
 
-        # 상단 다크 배경 + 키워드 텍스트
-        text_h = 30
-        draw.rectangle([0, 0, w, text_h], fill=(30, 30, 30))
-        draw.text((8, 7), keyword, fill=(255, 255, 255), font=font)
+    # 키워드 텍스트 (상단 다크 배경)
+    text_h = 30
+    draw.rectangle([0, 0, w, text_h], fill=(30, 30, 30))
+    draw.text((8, 7), keyword, fill=(255, 255, 255), font=font)
 
-        # 빨간 테두리 (텍스트 영역 아래부터)
-        border = 3
-        draw.rectangle(
-            [border, text_h + border, w - border - 1, h - border - 1],
-            outline=(255, 0, 0), width=border
-        )
+    # 빨간 테두리 (HIGHLIGHT_COLOR = FF0000)
+    border = 2
+    draw.rectangle(
+        [border, text_h + border, w - border - 1, h - border - 1],
+        outline=(255, 0, 0), width=border
+    )
 
-        buf = io.BytesIO()
-        img.save(buf, format='PNG')
-        return buf.getvalue()
-    except Exception as e:
-        log(f"  캡처 이미지 생성 오류: {str(e)[:60]}")
-        try:
-            return driver.get_screenshot_as_png()
-        except Exception:
-            return None
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return buf.getvalue()
 
 
 # ── 노출 확인 ──────────────────────────────────────────────────
 
 def check_exposed(driver, keyword: str, blog_url: str) -> tuple[bool, bytes | None]:
-    """네이버 모바일 검색 → URL 매칭 → 노출 여부 + 크롭+오버레이 캡처 반환"""
+    """네이버 모바일 검색 → URL 매칭(scraper.py 로직) → 노출 여부 + 캡처 반환"""
     try:
         driver.get(f"https://m.search.naver.com/search.naver?query={urllib.parse.quote(keyword)}")
-        time.sleep(2)
+        time.sleep(SCROLL_PAUSE_SEC)
     except Exception as e:
         log(f"  검색 실패: {e}")
         return False, None
 
-    parsed = parse_url(blog_url)
-    post_no = parsed["post_no"]
-    blog_id = parsed["id"]
-    if not post_no:
+    link, section = _scroll_and_find(driver, blog_url)
+
+    if link is None:
         return False, None
 
-    found_link = None
-    for _ in range(4):
-        links = driver.find_elements(By.TAG_NAME, "a")
-        for link in links:
-            try:
-                href = (link.get_attribute("href") or "")
-                href = href.replace("m.blog.naver.com", "blog.naver.com").replace("m.cafe.naver.com", "cafe.naver.com")
-                if post_no in href and (not blog_id or blog_id in href):
-                    found_link = link
-                    break
-            except Exception:
-                continue
-        if found_link:
-            break
-        driver.execute_script("window.scrollBy(0, 1200)")
-        time.sleep(1.5)
-
-    if not found_link:
-        return False, None
-
-    # 섹션 탐색 → 크롭+오버레이 캡처
-    section = find_section(found_link, driver)
-    img_bytes = make_capture_bytes(driver, found_link, section, keyword)
-
+    img_bytes = _crop_and_overlay(driver, section, link, keyword)
     return True, img_bytes
 
 
