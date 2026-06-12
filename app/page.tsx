@@ -1,7 +1,6 @@
 'use client'
 import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
 interface Exposure { date: string; is_exposed: boolean }
 interface Post {
@@ -11,8 +10,9 @@ interface Post {
   amos_daily_exposure: Exposure[]
 }
 interface Capture {
-  id: string; batch_id: string; keyword: string; product: string | null
-  tab_type: string | null; is_exposed: boolean; image_url: string; created_at: string
+  id: string; batch_id: string; slot: string; keyword: string; product: string | null
+  expected_tab: string | null; section_name: string | null; tab_match: boolean
+  is_error: boolean; image_url: string; captured_at: string; brand: string
 }
 
 function getCode(url: string | null) {
@@ -43,6 +43,26 @@ function batchLabel(id: string) {
   return `${date?.slice(0,4)}-${date?.slice(4,6)}-${date?.slice(6,8)} ${m[slot] || slot || ''}`
 }
 
+function CapGrid({ caps, onPreview }: { caps: Capture[]; onPreview: (url: string) => void }) {
+  return (
+    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-3">
+      {caps.map(c => (
+        <div key={c.id} onClick={() => onPreview(c.image_url)}
+          className="bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow">
+          <img src={c.image_url} alt={c.keyword} className="w-full aspect-[9/16] object-cover" loading="lazy" />
+          <div className="p-2">
+            <div className="text-xs font-medium text-gray-800 truncate">{c.keyword}</div>
+            {c.product && <div className="text-xs text-gray-500 truncate">{c.product}</div>}
+            {c.section_name && (
+              <span className={`mt-1 inline-block text-xs px-1.5 py-0.5 rounded ${c.tab_match ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-600'}`}>{c.section_name}</span>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'exposure' | 'captures'>('exposure')
   const [posts, setPosts] = useState<Post[]>([])
@@ -59,6 +79,7 @@ export default function Home() {
   const [customEnd, setCustomEnd] = useState(toStr(new Date()))
   const [clicks, setClicks] = useState<Record<string, number>>({})
   const [capBatch, setCapBatch] = useState('')
+  const [capBrand, setCapBrand] = useState<'전체' | '아모스' | '아윤채'>('전체')
   const [capPreview, setCapPreview] = useState<string | null>(null)
 
   const range = rangeMode === 'custom' ? { start: customStart, end: customEnd } : calcRange(rangeMode)
@@ -155,7 +176,10 @@ export default function Home() {
 
   const batches = Array.from(new Set(captures.map(c => c.batch_id))).sort((a, b) => b.localeCompare(a))
   const activeBatch = capBatch || batches[0] || ''
-  const filteredCaps = captures.filter(c => c.batch_id === activeBatch)
+  const batchCaps = captures.filter(c => c.batch_id === activeBatch)
+  const amosCaps = batchCaps.filter(c => c.brand === '아모스')
+  const ayuncheCaps = batchCaps.filter(c => c.brand === '아윤채')
+  const filteredCaps = capBrand === '전체' ? batchCaps : capBrand === '아모스' ? amosCaps : ayuncheCaps
 
   const heatmapLabel = selectedPost
     ? selectedPost.keyword
@@ -363,23 +387,25 @@ export default function Home() {
                   <div><span className="text-gray-400 text-xs block">총 클릭수</span>{clicks[selectedPost.id] != null ? clicks[selectedPost.id].toLocaleString() : '-'}</div>
                 </div>
 
-                {/* 일별 노출 도표 */}
+                {/* 일별 노출 도표 — 노출된 날만 점 표시 */}
                 <h4 className="text-xs font-semibold text-gray-500 mb-2">일별 노출 현황</h4>
-                <ResponsiveContainer width="100%" height={120}>
-                  <BarChart data={chartData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
-                    <XAxis dataKey="date" tick={{ fontSize: 9 }} interval={Math.floor(chartData.length / 10)} />
-                    <YAxis hide domain={[0, 1]} />
-                    <Tooltip
-                      formatter={(v) => [v === 1 ? '노출' : '미노출', '']}
-                      labelFormatter={(l) => `날짜: ${l}`}
-                    />
-                    <Bar dataKey="exposed" radius={[2, 2, 0, 0]}>
-                      {chartData.map((entry, i) => (
-                        <Cell key={i} fill={entry.exposed ? '#22c55e' : '#e5e7eb'} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="overflow-x-auto pb-1">
+                  <div className="flex items-end gap-px" style={{ minWidth: `${chartData.length * 18}px` }}>
+                    {chartData.map((d, i) => {
+                      const showLabel = i === 0 || i === chartData.length - 1 || i % Math.ceil(chartData.length / 8) === 0
+                      return (
+                        <div key={i} className="flex flex-col items-center flex-shrink-0" style={{ width: 18 }}
+                          title={`${d.date}: ${d.exposed ? '노출' : '미노출'}`}>
+                          <div className={`w-2.5 h-2.5 rounded-full mb-1 ${d.exposed ? 'bg-red-500' : 'invisible'}`} />
+                          <div className="h-px w-full bg-gray-100" />
+                          {showLabel && (
+                            <span className="text-gray-400 mt-0.5" style={{ fontSize: 8, lineHeight: 1 }}>{d.date}</span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
 
                 {/* URL 링크 */}
                 <div className="flex gap-3 flex-wrap mt-3">
@@ -401,8 +427,16 @@ export default function Home() {
       ) : (
         /* 캡처 탭 */
         <div className="flex-1 overflow-y-auto p-5 bg-gray-50">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold text-gray-900">아윤채 캡처</h2>
+          {/* 헤더: 브랜드 드롭다운 + 배치 선택 */}
+          <div className="flex items-center justify-between mb-4 gap-3">
+            <div className="flex gap-2">
+              {(['전체','아모스','아윤채'] as const).map(b => (
+                <button key={b} onClick={() => setCapBrand(b)}
+                  className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${capBrand === b ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50'}`}>
+                  {b}
+                </button>
+              ))}
+            </div>
             <select value={activeBatch} onChange={e => setCapBatch(e.target.value)}
               className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none">
               {batches.map(b => <option key={b} value={b}>{batchLabel(b)}</option>)}
@@ -410,24 +444,36 @@ export default function Home() {
           </div>
           {capLoading ? (
             <div className="text-center py-20 text-gray-400">로딩 중...</div>
+          ) : capBrand === '전체' ? (
+            /* 전체: 아모스(위) + 아윤채(아래) 분리 */
+            <div className="space-y-8">
+              <div>
+                <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                  아모스
+                  <span className="text-xs font-normal text-gray-400">{amosCaps.length}건</span>
+                </h3>
+                {amosCaps.length === 0 ? (
+                  <div className="text-center py-10 text-gray-400 text-sm bg-white rounded-xl border border-gray-200">캡처 데이터 없음</div>
+                ) : (
+                  <CapGrid caps={amosCaps} onPreview={setCapPreview} />
+                )}
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                  아윤채
+                  <span className="text-xs font-normal text-gray-400">{ayuncheCaps.length}건</span>
+                </h3>
+                {ayuncheCaps.length === 0 ? (
+                  <div className="text-center py-10 text-gray-400 text-sm bg-white rounded-xl border border-gray-200">캡처 데이터 없음</div>
+                ) : (
+                  <CapGrid caps={ayuncheCaps} onPreview={setCapPreview} />
+                )}
+              </div>
+            </div>
           ) : filteredCaps.length === 0 ? (
             <div className="text-center py-20 text-gray-400">캡처 데이터 없음</div>
           ) : (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-3">
-              {filteredCaps.map(c => (
-                <div key={c.id} onClick={() => setCapPreview(c.image_url)}
-                  className="bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition-shadow">
-                  <img src={c.image_url} alt={c.keyword} className="w-full aspect-[9/16] object-cover" loading="lazy" />
-                  <div className="p-2">
-                    <div className="text-xs font-medium text-gray-800 truncate">{c.keyword}</div>
-                    {c.product && <div className="text-xs text-gray-500 truncate">{c.product}</div>}
-                    {c.tab_type && (
-                      <span className={`mt-1 inline-block text-xs px-1.5 py-0.5 rounded ${c.is_exposed ? 'bg-green-100 text-green-700' : 'bg-orange-50 text-orange-600'}`}>{c.tab_type}</span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
+            <CapGrid caps={filteredCaps} onPreview={setCapPreview} />
           )}
           {capPreview && (
             <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center" onClick={() => setCapPreview(null)}>
