@@ -299,29 +299,33 @@ def _capture_with_css_border(driver, link_element, keyword: str) -> bytes | None
     5. overlay 제거
     6. PIL로 상단 키워드 텍스트만 추가
     """
-    # 1. 포스팅 카드 요소 탐색
+    # 1. 링크 화면 중앙으로 스크롤
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'})", link_element)
+        time.sleep(0.5)
+    except Exception:
+        pass
+
+    # 2. 포스팅 카드 요소 탐색
     try:
         post_el = _find_post_element(driver, link_element)
     except Exception:
         post_el = link_element
 
-    # 2. CSS overlay div 주입 (position:absolute, 문서 절대좌표 기준)
+    # 3. CSS overlay div 주입 (z-index:999999, 빨간 테두리)
     overlay = None
     try:
         overlay = driver.execute_script("""
-            var el = arguments[0];
-            var r = el.getBoundingClientRect();
-            var scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-            var scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+            var r = arguments[0].getBoundingClientRect();
             var div = document.createElement('div');
             div.style.cssText = [
-                'position:absolute',
+                'position:fixed',
                 'pointer-events:none',
                 'z-index:999999',
-                'border:3px solid #FF0000',
+                'border:2px solid #FF0000',
                 'box-sizing:border-box',
-                'left:' + (r.left + scrollLeft) + 'px',
-                'top:' + (r.top + scrollTop) + 'px',
+                'left:' + r.left + 'px',
+                'top:' + r.top + 'px',
                 'width:' + r.width + 'px',
                 'height:' + r.height + 'px'
             ].join(';');
@@ -331,13 +335,7 @@ def _capture_with_css_border(driver, link_element, keyword: str) -> bytes | None
     except Exception:
         pass
 
-    # 3. 페이지 맨 위로 스크롤 → 전체 화면 캡처
-    try:
-        driver.execute_script("window.scrollTo(0, 0);")
-        time.sleep(0.3)
-    except Exception:
-        pass
-
+    # 4. 전체 뷰포트 스크린샷 (CSS overlay가 이미지에 직접 렌더링됨)
     screenshot_bytes = driver.get_screenshot_as_png()
 
     # 5. overlay 제거
