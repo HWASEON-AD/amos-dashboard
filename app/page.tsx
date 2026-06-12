@@ -7,6 +7,7 @@ interface Post {
   id: string; keyword: string; product: string | null
   blog_url: string | null; hwaseon_url: string | null
   tab_type: string | null; status: string; brand: string | null
+  total_views: number | null
   amos_daily_exposure: Exposure[]
 }
 interface DailyCapture {
@@ -224,7 +225,7 @@ export default function Home() {
                           }}
                           className="flex w-full items-center gap-1 px-2 py-1.5 font-bold text-gray-800 hover:bg-gray-100">
                           <span className="text-gray-500 text-[11px]">{isBrandOpen ? '▼' : '▶'}</span>
-                          <span>{brand}</span>
+                          <span className="whitespace-nowrap">{brand}</span>
                           <span className="ml-auto text-gray-400 text-xs font-normal">{brandCount}</span>
                         </button>
                         {isBrandOpen && brandProducts.map(product => {
@@ -336,6 +337,7 @@ export default function Home() {
                           <div className={`w-36 flex-shrink-0 text-xs truncate pr-2 flex items-center gap-1 ${isSelected ? 'text-blue-700 font-medium' : 'text-gray-600'}`}>
                             <span className="truncate">{p.keyword}</span>
                             <span className="flex-shrink-0 text-gray-400">{p.amos_daily_exposure.length}일</span>
+                            {p.total_views != null && <span className="flex-shrink-0 text-gray-400">{p.total_views.toLocaleString()}</span>}
                           </div>
                           {days.map(d => (
                             <div key={d} title={`${p.keyword} ${d}`}
