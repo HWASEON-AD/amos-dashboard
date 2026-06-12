@@ -94,6 +94,7 @@ def upload_screenshot(post_id: str, img_bytes: bytes) -> str | None:
             'apikey': SUPABASE_KEY,
             'Authorization': f'Bearer {SUPABASE_KEY}',
             'Content-Type': 'image/png',
+            'x-upsert': 'true',
         },
         data=img_bytes,
         timeout=15
@@ -104,9 +105,9 @@ def upload_screenshot(post_id: str, img_bytes: bytes) -> str | None:
 
 
 def save_capture(post_id: str, brand: str | None, keyword: str, product: str | None, image_url: str):
-    """amos_daily_captures에 노출 캡처 저장 (upsert)"""
+    """amos_daily_captures에 노출 캡처 저장 (upsert — post_id+date 충돌 시 image_url 덮어쓰기)"""
     r = requests.post(
-        f'{SUPABASE_URL}/rest/v1/amos_daily_captures',
+        f'{SUPABASE_URL}/rest/v1/amos_daily_captures?on_conflict=post_id,date',
         headers={**SB_HEADERS, 'Prefer': 'resolution=merge-duplicates'},
         json={
             'post_id': post_id,
@@ -119,7 +120,7 @@ def save_capture(post_id: str, brand: str | None, keyword: str, product: str | N
         timeout=10
     )
     if not r.ok:
-        log(f"  캡처 DB 저장 실패: {r.status_code}")
+        log(f"  캡처 DB 저장 실패: {r.status_code} {r.text[:80]}")
 
 
 # ── Selenium 드라이버 ──────────────────────────────────────────
