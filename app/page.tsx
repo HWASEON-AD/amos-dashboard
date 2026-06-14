@@ -69,7 +69,7 @@ export default function Home() {
   const [customStart, setCustomStart] = useState(toStr(new Date(Date.now() - 29 * 86400000)))
   const [customEnd, setCustomEnd] = useState(toStr(new Date()))
   const [clicks, setClicks] = useState<Record<string, number>>({})
-  const [capDate, setCapDate] = useState('')
+  const [capDate, setCapDate] = useState(toStr(new Date()))
   const [dailyCaptures, setDailyCaptures] = useState<DailyCapture[]>([])
   const [capBrand, setCapBrand] = useState<'전체' | '아모스' | '아윤채'>('전체')
   const [capPreview, setCapPreview] = useState<string | null>(null)
@@ -106,8 +106,8 @@ export default function Home() {
 
   useEffect(() => {
     if (activeTab !== 'captures') return
-    if (!capDate) loadCaptures()
-  }, [activeTab, capDate, loadCaptures])
+    if (dailyCaptures.length === 0) loadCaptures(capDate)
+  }, [activeTab, capDate, dailyCaptures.length, loadCaptures])
 
   // 3-level: 브랜드 > product > keyword
   const brandProductMap: Record<string, Record<string, Post[]>> = {}
