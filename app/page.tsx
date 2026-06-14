@@ -328,7 +328,7 @@ export default function Home() {
                   <div className="inline-block min-w-full">
                     {/* 날짜 헤더 */}
                     <div className="flex gap-0.5 mb-1">
-                      <div className="w-36 flex-shrink-0" />
+                      <div className="w-44 flex-shrink-0" />
                       {days.map(d => (
                         <div key={d} className="w-5 flex-shrink-0 text-center text-gray-400" style={{ fontSize: '9px' }}>
                           {d.slice(8)}
@@ -342,15 +342,19 @@ export default function Home() {
                       return (
                         <div key={p.id}
                           onClick={() => handleKeywordClick(p)}
-                          className={`flex items-center gap-0.5 mb-0.5 cursor-pointer rounded-sm ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
-                          <div className={`w-36 flex-shrink-0 text-xs truncate pr-2 flex items-center gap-1 ${isSelected ? 'text-blue-700 font-medium' : 'text-gray-600'}`}>
-                            <span className="truncate">{p.keyword}</span>
-                            <span className="flex-shrink-0 text-gray-400">{p.amos_daily_exposure.length}일</span>
-                            {p.total_views != null && <span className="flex-shrink-0 text-gray-400">{p.total_views.toLocaleString()}</span>}
+                          className={`flex items-center gap-0.5 mb-1 cursor-pointer rounded-md px-1 py-0.5 ${isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}`}>
+                          <div className={`w-44 flex-shrink-0 pr-2 min-w-0 ${isSelected ? 'text-blue-700' : 'text-gray-700'}`}>
+                            <div className="text-xs font-medium truncate leading-tight">{p.keyword}</div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[10px] text-gray-400">{p.amos_daily_exposure.length}일</span>
+                              {p.total_views != null && (
+                                <span className="text-[10px] text-gray-400">{p.total_views.toLocaleString()}회</span>
+                              )}
+                            </div>
                           </div>
                           {days.map(d => (
                             <div key={d} title={`${p.keyword} ${d}`}
-                              className={`w-5 h-4 rounded-sm flex-shrink-0 ${expSet.has(d) ? 'bg-green-500' : 'bg-gray-100'}`} />
+                              className={`w-5 h-5 rounded flex-shrink-0 ${expSet.has(d) ? 'bg-green-500' : 'bg-gray-100'}`} />
                           ))}
                         </div>
                       )
