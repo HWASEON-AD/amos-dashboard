@@ -2,7 +2,9 @@ name: 네이버 노출 자동 체크
 
 on:
   schedule:
-    - cron: '0 1 * * *'   # 매일 KST 10:00 (UTC 01:00)
+    - cron: '0 23 * * *'  # 매일 KST 08:00 (UTC 23:00 전날)
+    - cron: '0 5 * * *'   # 매일 KST 14:00 (UTC 05:00)
+    - cron: '0 11 * * *'  # 매일 KST 20:00 (UTC 11:00)
   workflow_dispatch:       # 수동 실행 버튼
 
 jobs:

@@ -19,11 +19,14 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from PIL import Image, ImageDraw, ImageFont
 import io
+from datetime import timezone, timedelta
 
 # ── 환경 변수 ──────────────────────────────────────────────────
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://kepzsboxjulzygehmzpf.supabase.co')
 SUPABASE_KEY = os.environ['SUPABASE_SERVICE_KEY']
-TODAY = date.today().isoformat()
+# GitHub Actions는 UTC 기준 실행 → KST(+9) 날짜로 변환
+KST = timezone(timedelta(hours=9))
+TODAY = datetime.now(KST).date().isoformat()
 
 SB_HEADERS = {
     'apikey': SUPABASE_KEY,
@@ -63,9 +66,20 @@ def get_posts() -> list[dict]:
     return r.json()
 
 
+def _already_exposed_today(post_id: str) -> bool:
+    """당일 기준 이미 노출 기록이 있는지 확인 (오늘 3회 중 한 번이라도 있으면 True)"""
+    r = requests.get(
+        f'{SUPABASE_URL}/rest/v1/amos_daily_exposure'
+        f'?post_id=eq.{post_id}&date=eq.{TODAY}&select=post_id',
+        headers=SB_HEADERS,
+        timeout=10
+    )
+    return r.ok and len(r.json()) > 0
+
+
 def save_exposure(post_id: str, is_exposed: bool):
-    """노출된 경우만 amos_daily_exposure에 INSERT, 상태도 업데이트"""
-    # 노출 기록 (row 존재 = 노출, is_exposed 컬럼 없음)
+    """노출 기록 저장 및 상태 업데이트.
+    당일 기준: 3회 체크 중 한 번이라도 노출되면 오늘 하루는 노출중 유지."""
     if is_exposed:
         r = requests.post(
             f'{SUPABASE_URL}/rest/v1/amos_daily_exposure',
@@ -75,8 +89,13 @@ def save_exposure(post_id: str, is_exposed: bool):
         )
         if not r.ok:
             log(f"  노출기록 저장 실패: {r.status_code}")
-    # amos_posts 상태 업데이트
-    new_status = '노출중' if is_exposed else '미노출'
+
+    # 현재 미노출이더라도 오늘 이미 노출 기록 있으면 노출중 유지
+    if is_exposed or _already_exposed_today(post_id):
+        new_status = '노출중'
+    else:
+        new_status = '미노출'
+
     requests.patch(
         f'{SUPABASE_URL}/rest/v1/amos_posts?id=eq.{post_id}',
         headers=SB_HEADERS,
