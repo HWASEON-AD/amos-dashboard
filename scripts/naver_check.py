@@ -51,12 +51,14 @@ def log(msg: str):
 
 # ── Supabase 연동 ──────────────────────────────────────────────
 
-def get_posts() -> list[dict]:
-    """blog_url 있는 포스트 전체 조회 (상태 무관)"""
+def get_posts(post_id: str | None = None) -> list[dict]:
+    """blog_url 있는 포스트 조회 (상태 무관). post_id 지정 시 그 1건만 (즉시 1회 실행용)"""
+    filter_q = f'&id=eq.{post_id}' if post_id else ''
     r = requests.get(
         f'{SUPABASE_URL}/rest/v1/amos_posts'
         '?select=id,keyword,blog_url,tab_type,brand,product,hwaseon_url'
-        '&blog_url=not.is.null',
+        '&blog_url=not.is.null'
+        + filter_q,
         headers=SB_HEADERS,
         timeout=10
     )
@@ -490,9 +492,10 @@ def save_view_count(post_id: str, count: int):
 
 # ── 메인 ───────────────────────────────────────────────────────
 
-def main():
-    posts = get_posts()
-    log(f"체크 시작: {TODAY} / 총 {len(posts)}개")
+def main(post_id: str | None = None):
+    posts = get_posts(post_id)
+    mode = f"단일({post_id})" if post_id else "전체"
+    log(f"체크 시작: {TODAY} / 모드 {mode} / 총 {len(posts)}개")
 
     if not posts:
         log("체크할 포스트 없음 (노출중 + blog_url 있는 항목 0개)")
@@ -564,4 +567,11 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # --post-id <uuid> 또는 --post-id=<uuid> 지정 시 그 키워드 1건만 즉시 체크
+    arg_post_id = None
+    for idx, a in enumerate(sys.argv):
+        if a == '--post-id' and idx + 1 < len(sys.argv):
+            arg_post_id = sys.argv[idx + 1]
+        elif a.startswith('--post-id='):
+            arg_post_id = a.split('=', 1)[1]
+    main(arg_post_id)

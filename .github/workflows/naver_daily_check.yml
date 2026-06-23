@@ -2,6 +2,11 @@ name: 네이버 노출 자동 체크
 
 on:
   workflow_dispatch:       # cron-job.org에서 정확한 시간에 호출
+    inputs:
+      post_id:
+        description: '단일 키워드 즉시체크용 post_id (비우면 전체 체크)'
+        required: false
+        default: ''
 
 jobs:
   naver-check:
@@ -32,7 +37,12 @@ jobs:
         env:
           SUPABASE_URL: https://kepzsboxjulzygehmzpf.supabase.co
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python scripts/naver_check.py
+        run: |
+          if [ -n "${{ inputs.post_id }}" ]; then
+            python scripts/naver_check.py --post-id "${{ inputs.post_id }}"
+          else
+            python scripts/naver_check.py
+          fi
 
       - name: 캡처 이미지 Artifact 저장
         if: always()
