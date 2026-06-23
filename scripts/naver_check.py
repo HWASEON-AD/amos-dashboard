@@ -367,11 +367,30 @@ def _capture_with_css_border(driver, link_element, keyword: str) -> bytes | None
 
 # ── 노출 확인 ──────────────────────────────────────────────────
 
+def _wait_for_ugc(driver, timeout: float = 12.0):
+    """인기글(블로그·카페 UGC) 블록은 client-side JS로 늦게 렌더된다.
+    카페/블로그 링크가 충분히 렌더될 때까지 대기 (없으면 timeout까지).
+    → 렌더 전에 매칭해서 노출글을 '미노출'로 오탐하던 문제 해결."""
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            c = driver.execute_script(
+                "return document.querySelectorAll(\"a[href*='cafe.naver'], a[href*='blog.naver']\").length"
+            )
+        except Exception:
+            c = 0
+        if c and c >= 3:
+            time.sleep(1.0)  # 렌더 안정화 여유
+            return
+        time.sleep(0.5)
+
+
 def check_exposed(driver, keyword: str, blog_url: str) -> tuple[bool, bytes | None]:
     """네이버 모바일 검색 → URL 매칭 → 노출 여부 + 전체화면+CSS빨간테두리 캡처 반환"""
     try:
         driver.get(f"https://m.search.naver.com/search.naver?query={urllib.parse.quote(keyword)}")
-        time.sleep(SCROLL_PAUSE_SEC)
+        # 인기글(UGC)이 자바스크립트로 렌더 완료될 때까지 대기 (과거 미노출 오탐 원인)
+        _wait_for_ugc(driver)
     except Exception as e:
         log(f"  검색 실패: {e}")
         return False, None
