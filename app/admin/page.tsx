@@ -11,7 +11,7 @@ interface Keyword {
 }
 
 const STATUSES = ['미노출', '노출중', '종료', '진행X']
-const BRANDS = ['아모스', '아윤체']
+const BRANDS = ['아모스', '아윤채']
 
 function getCode(url: string | null) {
   if (!url) return null
@@ -196,7 +196,7 @@ export default function AdminPage() {
     const ws = XLSX.utils.aoa_to_sheet([
       ['브랜드', '제품', '키워드', '노출탭', '발행URL', '제품링크URL', ...dates],
       ['아모스', '헤어오일', '아모스 헤어오일 효능', '인플루언서 블로그', 'https://blog.naver.com/example/123', '', ...dates.map(() => '')],
-      ['아윤체', '샴푸', '아윤체 두피 샴푸', '블로그', '', '', ...dates.map(() => '')],
+      ['아윤채', '샴푸', '아윤채 두피 샴푸', '블로그', '', '', ...dates.map(() => '')],
     ])
     ws['!cols'] = [{ wch: 8 }, { wch: 15 }, { wch: 28 }, { wch: 12 }, { wch: 45 }, { wch: 35 }, ...dates.map(() => ({ wch: 11 }))]
     XLSX.utils.book_append_sheet(wb, ws, '노출현황')
@@ -408,7 +408,7 @@ export default function AdminPage() {
                           <>
                             <td className="px-3 py-3 text-gray-400 text-xs">{i + 1}</td>
                             <td className="px-3 py-3">
-                              <span className={`px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap ${row.brand === '아윤체' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
+                              <span className={`px-2 py-0.5 text-xs rounded font-medium whitespace-nowrap ${row.brand === '아윤채' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
                                 {row.brand || '아모스'}
                               </span>
                             </td>

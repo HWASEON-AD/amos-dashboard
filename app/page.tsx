@@ -63,7 +63,7 @@ export default function Home() {
   // 선택 상태: 제품 선택 vs 키워드 선택 분리
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null)
   const [selectedPost, setSelectedPost] = useState<Post | null>(null)
-  const [openBrands, setOpenBrands] = useState<Set<string>>(new Set(['아모스', '아윤체']))
+  const [openBrands, setOpenBrands] = useState<Set<string>>(new Set(['아모스', '아윤채']))
   const [openProducts, setOpenProducts] = useState<Set<string>>(new Set())
   const [rangeMode, setRangeMode] = useState('30d')
   const [customStart, setCustomStart] = useState(toStr(new Date(Date.now() - 29 * 86400000)))
