@@ -99,6 +99,9 @@ export default function AdminPage() {
   const [rows, setRows] = useState<Keyword[]>([])
   const [loading, setLoading] = useState(true)
   const [editId, setEditId] = useState<string | null>(null)
+  // 인라인 편집(구분/구분2 셀 클릭 즉시 수정): 어떤 행의 어떤 필드가 열려있는지
+  const [inlineEdit, setInlineEdit] = useState<{ id: string; field: 'category' | 'category2' } | null>(null)
+  const [inlineSaving, setInlineSaving] = useState(false)
   const [edit, setEdit] = useState({ keyword: '', product: '', blog_url: '', image_host_url: '', hwaseon_url: '', tab_type: '', status: '', brand: '아모스', category: '', category2: '' })
   const [newRow, setNew] = useState({ keyword: '', product: '', blog_url: '', image_host_url: '', hwaseon_url: '', tab_type: '', brand: '아모스', category: '', category2: '' })
   const [pasteText, setPaste] = useState('')
@@ -164,6 +167,26 @@ export default function AdminPage() {
     } catch (e) {
       setRows(rs => rs.map(r => r.id === id ? { ...r, progress: current } : r))
       flash(`진행 상태 저장 실패: ${e instanceof Error ? e.message : String(e)}`, false)
+    }
+  }
+
+  // 인라인 저장(구분/구분2): 낙관적 업데이트 후 PATCH, 실패 시 원복+flash. load() 재호출 안 함
+  async function saveInline(id: string, field: 'category' | 'category2', raw: string) {
+    const value = raw.trim() || null
+    const current = rows.find(r => r.id === id)?.[field] ?? null
+    setInlineEdit(null)
+    if (value === current) return  // 변경 없으면 PATCH 생략
+    if (inlineSaving) return       // 중복 저장 가드
+    setInlineSaving(true)
+    setRows(rs => rs.map(r => r.id === id ? { ...r, [field]: value } : r))
+    try {
+      const res = await fetch(`/api/keywords/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [field]: value }) })
+      if (!res.ok) throw new Error(String(res.status))
+    } catch (e) {
+      setRows(rs => rs.map(r => r.id === id ? { ...r, [field]: current } : r))
+      flash(`저장 실패: ${e instanceof Error ? e.message : String(e)}`, false)
+    } finally {
+      setInlineSaving(false)
     }
   }
 
@@ -531,8 +554,47 @@ export default function AdminPage() {
                               </button>
                             </td>
                             <td className="px-3 py-3 text-gray-600 text-xs whitespace-nowrap max-w-[120px] truncate">{row.product || '-'}</td>
-                            <td className="px-3 py-3 text-gray-600 text-xs whitespace-nowrap max-w-[120px] truncate">{row.category || '-'}</td>
-                            <td className="px-3 py-3 text-gray-600 text-xs whitespace-nowrap max-w-[120px] truncate">{row.category2 || '-'}</td>
+                            {/* 구분: 셀 클릭 → 인라인 select 즉시 저장 */}
+                            <td className="px-3 py-3 text-gray-600 text-xs whitespace-nowrap max-w-[120px]">
+                              {inlineEdit?.id === row.id && inlineEdit.field === 'category' ? (
+                                <select autoFocus defaultValue={row.category || ''}
+                                  onChange={e => saveInline(row.id, 'category', e.target.value)}
+                                  onBlur={() => setInlineEdit(null)}
+                                  className="border border-blue-400 rounded px-1 py-0.5 text-xs w-full">
+                                  <option value="">-</option>
+                                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                              ) : (
+                                <span onClick={() => setInlineEdit({ id: row.id, field: 'category' })}
+                                  title="클릭해서 수정"
+                                  className="block truncate cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1">
+                                  {row.category || '-'}
+                                </span>
+                              )}
+                            </td>
+                            {/* 구분2: 셀 클릭 → 인라인 input (Enter/blur 저장, Escape 취소) */}
+                            <td className="px-3 py-3 text-gray-600 text-xs whitespace-nowrap max-w-[120px]">
+                              {inlineEdit?.id === row.id && inlineEdit.field === 'category2' ? (
+                                <input autoFocus defaultValue={row.category2 || ''}
+                                  onKeyDown={e => {
+                                    const el = e.target as HTMLInputElement & { _cancel?: boolean }
+                                    if (e.key === 'Enter') el.blur()
+                                    else if (e.key === 'Escape') { el._cancel = true; el.blur() }
+                                  }}
+                                  onBlur={e => {
+                                    const el = e.target as HTMLInputElement & { _cancel?: boolean }
+                                    if (el._cancel) { setInlineEdit(null); return }
+                                    saveInline(row.id, 'category2', e.target.value)
+                                  }}
+                                  className="border border-blue-400 rounded px-1 py-0.5 text-xs w-full min-w-[70px]" />
+                              ) : (
+                                <span onClick={() => setInlineEdit({ id: row.id, field: 'category2' })}
+                                  title="클릭해서 수정"
+                                  className="block truncate cursor-pointer hover:bg-blue-50 rounded px-1 -mx-1">
+                                  {row.category2 || '-'}
+                                </span>
+                              )}
+                            </td>
                             <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{row.keyword}</td>
                             {/* 검색량 */}
                             <td className="px-3 py-3 text-right whitespace-nowrap">
