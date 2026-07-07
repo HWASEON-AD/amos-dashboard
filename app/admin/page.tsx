@@ -7,12 +7,16 @@ interface Keyword {
   id: string; keyword: string; product: string | null
   blog_url: string | null; hwaseon_url: string | null; image_host_url: string | null
   tab_type: string | null; status: string; brand: string | null
+  category: string | null; category2: string | null; progress: string | null
   cafe_views: number | null; image_views: number | null
   amos_daily_exposure: Exposure[]
 }
+// 검색량 응답 계약: volumes[키워드] = { pc, mobile, total }
+type Volume = { pc: number; mobile: number; total: number }
 
 const STATUSES = ['미노출', '노출중', '종료', '진행X']
 const BRANDS = ['아모스', '아윤채']
+const CATEGORIES = ['건바이건', '월보장']
 
 function getCode(url: string | null) {
   if (!url) return null
@@ -93,8 +97,8 @@ export default function AdminPage() {
   const [rows, setRows] = useState<Keyword[]>([])
   const [loading, setLoading] = useState(true)
   const [editId, setEditId] = useState<string | null>(null)
-  const [edit, setEdit] = useState({ keyword: '', product: '', blog_url: '', image_host_url: '', hwaseon_url: '', tab_type: '', status: '', brand: '아모스' })
-  const [newRow, setNew] = useState({ keyword: '', product: '', blog_url: '', image_host_url: '', hwaseon_url: '', tab_type: '', brand: '아모스' })
+  const [edit, setEdit] = useState({ keyword: '', product: '', blog_url: '', image_host_url: '', hwaseon_url: '', tab_type: '', status: '', brand: '아모스', category: '', category2: '' })
+  const [newRow, setNew] = useState({ keyword: '', product: '', blog_url: '', image_host_url: '', hwaseon_url: '', tab_type: '', brand: '아모스', category: '', category2: '' })
   const [pasteText, setPaste] = useState('')
   const [pasteMode, setPasteMode] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -105,6 +109,8 @@ export default function AdminPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [refreshingViews, setRefreshingViews] = useState(false)
   const [clicks, setClicks] = useState<Record<string, number>>({})
+  const [volumes, setVolumes] = useState<Record<string, Volume>>({})
+  const [volLoading, setVolLoading] = useState(true)
   const [urlFilter, setUrlFilter] = useState('전체')
   const [productFilter, setProductFilter] = useState('제품 전체')
   const [brandFilter, setBrandFilter] = useState('브랜드 전체')
@@ -128,6 +134,36 @@ export default function AdminPage() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  // 검색량 조회 (keywords 로드와 독립적으로 마운트 시 1회) — 실패해도 다른 기능에 영향 없게 빈 객체 처리
+  useEffect(() => {
+    let alive = true
+    ;(async () => {
+      try {
+        const r = await fetch('/api/search-volume')
+        const d = await r.json()
+        if (alive) setVolumes(d?.volumes || {})
+      } catch {
+        if (alive) setVolumes({})
+      } finally {
+        if (alive) setVolLoading(false)
+      }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  // 진행 상태 토글 (작업중 ↔ 작업완료): 낙관적 업데이트 후 PATCH, 실패 시 원복 + flash 에러
+  async function toggleProgress(id: string, current: string | null) {
+    const next = (current || '작업중') === '작업중' ? '작업완료' : '작업중'
+    setRows(rs => rs.map(r => r.id === id ? { ...r, progress: next } : r))
+    try {
+      const res = await fetch(`/api/keywords/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ progress: next }) })
+      if (!res.ok) throw new Error(String(res.status))
+    } catch (e) {
+      setRows(rs => rs.map(r => r.id === id ? { ...r, progress: current } : r))
+      flash(`진행 상태 저장 실패: ${e instanceof Error ? e.message : String(e)}`, false)
+    }
+  }
 
   // 키워드 수정/추가 후 즉시 1회 노출 체크 트리거 (fire-and-forget, 실패해도 흐름 유지)
   function triggerCheck(postId: string) {
@@ -192,7 +228,7 @@ export default function AdminPage() {
       const created = await r.json().catch(() => null)
       // id가 있을 때만 트리거 (빈 문자열이면 GitHub Actions가 0건 매칭으로 헛돌므로 호출하지 않음)
       if (created?.id) triggerCheck(created.id)  // 추가 성공 후 새 post id로 1회 트리거
-      setNew({ keyword: '', product: '', blog_url: '', image_host_url: '', hwaseon_url: '', tab_type: '', brand: '아모스' }); load()
+      setNew({ keyword: '', product: '', blog_url: '', image_host_url: '', hwaseon_url: '', tab_type: '', brand: '아모스', category: '', category2: '' }); load()
     } else flash('추가 실패', false)
   }
 
@@ -381,14 +417,18 @@ export default function AdminPage() {
             <div className="text-center py-16 text-gray-400">로딩 중...</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[1400px]">
+              <table className="w-full text-sm min-w-[1600px]">
                 <thead className="bg-gray-50 text-gray-500 text-xs border-b border-gray-100">
                   <tr>
                     <th className="text-left px-3 py-2 w-8 whitespace-nowrap">#</th>
                     <th className="text-left px-3 py-2 whitespace-nowrap">브랜드</th>
                     <th className="text-left px-3 py-2 whitespace-nowrap">상태</th>
+                    <th className="text-left px-3 py-2 whitespace-nowrap">진행</th>
                     <th className="text-left px-3 py-2 whitespace-nowrap">제품</th>
+                    <th className="text-left px-3 py-2 whitespace-nowrap">구분</th>
+                    <th className="text-left px-3 py-2 whitespace-nowrap">구분2</th>
                     <th className="text-left px-3 py-2 whitespace-nowrap">키워드</th>
+                    <th className="text-right px-3 py-2 whitespace-nowrap" title="네이버 검색광고 API — 오늘 조회한 최근 30일 검색량">검색량</th>
                     <th className="text-left px-3 py-2 whitespace-nowrap">노출탭</th>
                     <th className="text-left px-3 py-2 whitespace-nowrap">발행URL</th>
                     <th className="text-left px-3 py-2 whitespace-nowrap">이미지호스팅URL</th>
@@ -420,12 +460,34 @@ export default function AdminPage() {
                                 {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                               </select>
                             </td>
-                            {(['product', 'keyword'] as const).map(f => (
-                              <td key={f} className="px-2 py-1.5">
-                                <input value={edit[f]} onChange={e => setEdit(p => ({ ...p, [f]: e.target.value }))}
-                                  className="border border-blue-400 rounded px-2 py-1 text-xs w-full min-w-[80px]" />
-                              </td>
-                            ))}
+                            {/* 진행: 편집 대상 아님 */}
+                            <td className="px-3 py-1.5 text-gray-300 text-xs text-center">-</td>
+                            {/* 제품 */}
+                            <td className="px-2 py-1.5">
+                              <input value={edit.product} onChange={e => setEdit(p => ({ ...p, product: e.target.value }))}
+                                className="border border-blue-400 rounded px-2 py-1 text-xs w-full min-w-[80px]" />
+                            </td>
+                            {/* 구분: 드롭다운 (건바이건 / 월보장, 빈 값 = 미선택) */}
+                            <td className="px-2 py-1.5">
+                              <select value={edit.category} onChange={e => setEdit(p => ({ ...p, category: e.target.value }))}
+                                className="border border-blue-400 rounded px-2 py-1 text-xs w-full">
+                                <option value="">-</option>
+                                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                              </select>
+                            </td>
+                            {/* 구분2: 자유 텍스트 */}
+                            <td className="px-2 py-1.5">
+                              <input value={edit.category2} onChange={e => setEdit(p => ({ ...p, category2: e.target.value }))}
+                                placeholder="구분2"
+                                className="border border-blue-400 rounded px-2 py-1 text-xs w-full min-w-[70px]" />
+                            </td>
+                            {/* 키워드 */}
+                            <td className="px-2 py-1.5">
+                              <input value={edit.keyword} onChange={e => setEdit(p => ({ ...p, keyword: e.target.value }))}
+                                className="border border-blue-400 rounded px-2 py-1 text-xs w-full min-w-[80px]" />
+                            </td>
+                            {/* 검색량: 편집 대상 아님 */}
+                            <td className="px-3 py-1.5 text-gray-300 text-xs text-right">-</td>
                             <td className="px-2 py-1.5">
                               <input value={edit.tab_type} onChange={e => setEdit(p => ({ ...p, tab_type: e.target.value }))}
                                 className="border border-blue-400 rounded px-2 py-1 text-xs w-full min-w-[60px]" />
@@ -433,7 +495,7 @@ export default function AdminPage() {
                             {(['blog_url', 'image_host_url', 'hwaseon_url'] as const).map(f => (
                               <td key={f} className="px-2 py-1.5">
                                 <input value={edit[f]} onChange={e => setEdit(p => ({ ...p, [f]: e.target.value }))}
-                                  className="border border-blue-400 rounded px-2 py-1 text-xs w-full min-w-[100px]" />
+                                  className="border border-blue-400 rounded px-2 py-1 text-xs w-full min-w-[70px]" />
                               </td>
                             ))}
                             <td className="px-3 py-1.5 text-gray-300 text-xs text-right">-</td>
@@ -458,22 +520,40 @@ export default function AdminPage() {
                                 {row.status || '-'}
                               </span>
                             </td>
+                            {/* 진행: 배지 클릭 시 작업중↔작업완료 즉시 전환 */}
+                            <td className="px-3 py-3 whitespace-nowrap">
+                              <button onClick={() => toggleProgress(row.id, row.progress)}
+                                title="클릭하면 작업중↔작업완료 전환"
+                                className={`px-2 py-0.5 text-xs rounded-full font-semibold cursor-pointer transition ${(row.progress || '작업중') === '작업완료' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}>
+                                {row.progress || '작업중'}
+                              </button>
+                            </td>
                             <td className="px-3 py-3 text-gray-600 text-xs whitespace-nowrap max-w-[120px] truncate">{row.product || '-'}</td>
+                            <td className="px-3 py-3 text-gray-600 text-xs whitespace-nowrap max-w-[120px] truncate">{row.category || '-'}</td>
+                            <td className="px-3 py-3 text-gray-600 text-xs whitespace-nowrap max-w-[120px] truncate">{row.category2 || '-'}</td>
                             <td className="px-3 py-3 font-medium text-gray-900 whitespace-nowrap">{row.keyword}</td>
+                            {/* 검색량 */}
+                            <td className="px-3 py-3 text-right whitespace-nowrap">
+                              {volumes[row.keyword]?.total != null
+                                ? <span className="text-xs font-semibold text-gray-700" title={`PC ${volumes[row.keyword].pc} / 모바일 ${volumes[row.keyword].mobile}`}>{volumes[row.keyword].total.toLocaleString()}</span>
+                                : volLoading
+                                  ? <span className="text-gray-300 text-xs">…</span>
+                                  : <span className="text-gray-300 text-xs">-</span>}
+                            </td>
                             <td className="px-3 py-3 text-gray-500 text-xs whitespace-nowrap">{row.tab_type || '-'}</td>
-                            <td className="px-3 py-3 max-w-[160px]">
+                            <td className="px-3 py-3 max-w-[70px]">
                               {row.blog_url
-                                ? <a href={row.blog_url} target="_blank" rel="noreferrer" className="text-blue-500 text-xs hover:underline truncate block max-w-[150px]">{row.blog_url}</a>
+                                ? <a href={row.blog_url} target="_blank" rel="noreferrer" className="text-blue-500 text-xs hover:underline truncate block max-w-[70px]">{row.blog_url}</a>
                                 : <span className="text-gray-300 text-xs">-</span>}
                             </td>
-                            <td className="px-3 py-3 max-w-[150px]">
+                            <td className="px-3 py-3 max-w-[110px]">
                               {row.image_host_url
-                                ? <a href={row.image_host_url} target="_blank" rel="noreferrer" className="text-emerald-500 text-xs hover:underline truncate block max-w-[140px]">{row.image_host_url}</a>
+                                ? <a href={row.image_host_url} target="_blank" rel="noreferrer" className="text-emerald-500 text-xs hover:underline truncate block max-w-[110px]">{row.image_host_url}</a>
                                 : <span className="text-gray-300 text-xs">-</span>}
                             </td>
-                            <td className="px-3 py-3 max-w-[150px]">
+                            <td className="px-3 py-3 max-w-[90px]">
                               {row.hwaseon_url
-                                ? <a href={row.hwaseon_url} target="_blank" rel="noreferrer" className="text-purple-500 text-xs hover:underline truncate block max-w-[140px]">{row.hwaseon_url}</a>
+                                ? <a href={row.hwaseon_url} target="_blank" rel="noreferrer" className="text-purple-500 text-xs hover:underline truncate block max-w-[90px]">{row.hwaseon_url}</a>
                                 : <span className="text-gray-400 text-xs">알수없음</span>}
                             </td>
                             <td className="px-3 py-3 text-right text-xs text-gray-600 whitespace-nowrap">{exposureDays > 0 ? `${exposureDays}일` : '-'}</td>
@@ -497,7 +577,7 @@ export default function AdminPage() {
                                 : <span className="text-gray-300 text-xs">-</span>}
                             </td>
                             <td className="px-3 py-3 whitespace-nowrap">
-                              <button onClick={() => { setEditId(row.id); setEdit({ keyword: row.keyword, product: row.product || '', blog_url: row.blog_url || '', image_host_url: row.image_host_url || '', hwaseon_url: row.hwaseon_url || '', tab_type: row.tab_type || '', status: row.status, brand: row.brand || '아모스' }) }}
+                              <button onClick={() => { setEditId(row.id); setEdit({ keyword: row.keyword, product: row.product || '', blog_url: row.blog_url || '', image_host_url: row.image_host_url || '', hwaseon_url: row.hwaseon_url || '', tab_type: row.tab_type || '', status: row.status, brand: row.brand || '아모스', category: row.category || '', category2: row.category2 || '' }) }}
                                 className="text-xs text-gray-400 hover:text-gray-700 mr-2">수정</button>
                               <button onClick={() => del(row.id, row.keyword)}
                                 className="text-xs text-gray-300 hover:text-red-500">×</button>
@@ -516,14 +596,35 @@ export default function AdminPage() {
                         {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
                       </select>
                     </td>
-                    <td />
-                    {([['product', '제품명'], ['keyword', '키워드 (필수)']] as [string, string][]).map(([k, ph]) => (
-                      <td key={k} className="px-2 py-2">
-                        <input value={(newRow as Record<string, string>)[k]} onChange={e => setNew(p => ({ ...p, [k]: e.target.value }))}
-                          placeholder={ph}
-                          className="border border-gray-300 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-400" />
-                      </td>
-                    ))}
+                    <td /> {/* 상태 */}
+                    <td /> {/* 진행 */}
+                    {/* 제품 */}
+                    <td className="px-2 py-2">
+                      <input value={newRow.product} onChange={e => setNew(p => ({ ...p, product: e.target.value }))}
+                        placeholder="제품명"
+                        className="border border-gray-300 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                    </td>
+                    {/* 구분: 드롭다운 (건바이건 / 월보장, 빈 값 = 미선택) */}
+                    <td className="px-2 py-2">
+                      <select value={newRow.category} onChange={e => setNew(p => ({ ...p, category: e.target.value }))}
+                        className="border border-gray-300 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-400">
+                        <option value="">-</option>
+                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </td>
+                    {/* 구분2: 자유 텍스트 */}
+                    <td className="px-2 py-2">
+                      <input value={newRow.category2} onChange={e => setNew(p => ({ ...p, category2: e.target.value }))}
+                        placeholder="구분2"
+                        className="border border-gray-300 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                    </td>
+                    {/* 키워드 */}
+                    <td className="px-2 py-2">
+                      <input value={newRow.keyword} onChange={e => setNew(p => ({ ...p, keyword: e.target.value }))}
+                        placeholder="키워드 (필수)"
+                        className="border border-gray-300 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-400" />
+                    </td>
+                    <td /> {/* 검색량 */}
                     <td className="px-2 py-2">
                       <input value={newRow.tab_type} onChange={e => setNew(p => ({ ...p, tab_type: e.target.value }))}
                         placeholder="노출탭"
@@ -542,10 +643,10 @@ export default function AdminPage() {
                     </td>
                   </tr>
                   {filtered.length === 0 && rows.length > 0 && (
-                    <tr><td colSpan={14} className="text-center py-8 text-gray-400 text-sm">필터 결과 없음</td></tr>
+                    <tr><td colSpan={18} className="text-center py-8 text-gray-400 text-sm">필터 결과 없음</td></tr>
                   )}
                   {rows.length === 0 && (
-                    <tr><td colSpan={14} className="text-center py-10 text-gray-400">데이터 없음</td></tr>
+                    <tr><td colSpan={18} className="text-center py-10 text-gray-400">데이터 없음</td></tr>
                   )}
                 </tbody>
               </table>

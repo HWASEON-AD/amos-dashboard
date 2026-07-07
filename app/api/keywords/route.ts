@@ -31,7 +31,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const { keyword, product, blog_url, hwaseon_url, image_host_url, tab, tab_type, brand } = body
+  const { keyword, product, blog_url, hwaseon_url, image_host_url, tab, tab_type, brand, category, category2 } = body
 
   if (!keyword) return NextResponse.json({ error: '키워드 필수' }, { status: 400 })
 
@@ -45,6 +45,8 @@ export async function POST(req: NextRequest) {
       image_host_url: image_host_url || null,
       tab_type: tab_type || tab || null,
       brand: brand || '아모스',
+      category: category || null,
+      category2: category2 || null,
       status: '미노출',
     })
     .select()

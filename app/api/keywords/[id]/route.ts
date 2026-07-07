@@ -5,7 +5,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   const body = await req.json()
 
   const updates: Record<string, string | null> = { updated_at: new Date().toISOString() }
-  for (const field of ['keyword', 'product', 'blog_url', 'hwaseon_url', 'image_host_url', 'tab_type', 'status', 'brand']) {
+  for (const field of ['keyword', 'product', 'blog_url', 'hwaseon_url', 'image_host_url', 'tab_type', 'status', 'brand', 'category', 'category2', 'progress']) {
     if (body[field] !== undefined) updates[field] = body[field] || null
   }
 
