@@ -1,6 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { combinedViews } from '@/lib/combined-views'
 import * as XLSX from 'xlsx'
+
+export const maxDuration = 60  // 외부 fetch(총 클릭수) 다수
+
+const HWASEON_URL_BASE = 'https://hwaseon-url.com'
+const HWASEON_URL_ADMIN_KEY = process.env.HWASEON_URL_ADMIN_KEY
+
+// hwaseon_url에서 shortCode 추출 (admin page의 getCode와 동일 로직)
+function shortCode(url: string | null): string | null {
+  if (!url) return null
+  try { return new URL(url).pathname.split('/').filter(Boolean)[0] || null } catch { return null }
+}
+
+// shortCode별 총 클릭수 조회 (실패/없음 = 0)
+async function fetchClicks(code: string): Promise<number> {
+  try {
+    const r = await fetch(`${HWASEON_URL_BASE}/api/stats/${code}`, {
+      headers: { 'x-admin-key': HWASEON_URL_ADMIN_KEY || '' },
+      cache: 'no-store',
+    })
+    if (!r.ok) return 0
+    const j = await r.json()
+    return typeof j?.totalVisits === 'number' ? j.totalVisits : 0
+  } catch {
+    return 0
+  }
+}
 
 function dateRange(start: string, end: string): string[] {
   const dates: string[] = []
@@ -37,23 +64,45 @@ export async function GET(req: NextRequest) {
   const dbDates = Array.from(new Set((exposures || []).map(e => e.date)))
   const allDates = Array.from(new Set([...dateRange(start, end), ...dbDates])).sort()
 
-  // post_id → Set<date> (노출된 날짜만)
+  // post_id → Set<date> (기간 필터 내 노출된 날짜만 — 날짜 컬럼용)
   const expMap: Record<string, Set<string>> = {}
   for (const e of exposures || []) {
     if (!expMap[e.post_id]) expMap[e.post_id] = new Set()
     expMap[e.post_id].add(e.date)
   }
 
-  // 단일 시트: 브랜드|제품|키워드|노출탭|발행URL|제품링크URL|날짜1|날짜2|...
-  const headers = ['브랜드', '제품', '키워드', '노출탭', '발행URL', '제품링크URL', ...allDates]
+  // 총 노출일: 기간 필터와 무관하게 전체 기간 기준 post_id별 노출일 수
+  const { data: allExp } = await supabaseAdmin
+    .from('amos_daily_exposure')
+    .select('post_id')
+  const totalExpMap: Record<string, number> = {}
+  for (const e of allExp || []) {
+    totalExpMap[e.post_id] = (totalExpMap[e.post_id] || 0) + 1
+  }
+
+  // 총 클릭수: hwaseon_url shortCode별 병렬 조회
+  const clickMap: Record<string, number> = {}
+  await Promise.all(
+    (posts || []).map(async p => {
+      const code = shortCode(p.hwaseon_url)
+      if (code) clickMap[p.id] = await fetchClicks(code)
+    }),
+  )
+
+  // 단일 시트: 브랜드|제품|키워드|노출탭|발행URL|제품링크URL|총노출일|조회수|총조회수|총클릭수|날짜1|...
+  const headers = ['브랜드', '제품', '키워드', '노출탭', '발행URL', '제품링크URL', '총노출일', '조회수', '총조회수', '총클릭수', ...allDates]
   const dataRows = (posts || []).map(p => {
-    const row: (string)[] = [
+    const row: (string | number)[] = [
       p.brand || '아모스',
       p.product || '',
       p.keyword,
       p.tab_type || '',
       p.blog_url || '',
       p.hwaseon_url || '',
+      totalExpMap[p.id] || 0,      // 총노출일 (전체 기간)
+      combinedViews(p),            // 조회수 (통합/누적)
+      p.image_views ?? '',         // 총조회수 (image_views raw)
+      clickMap[p.id] ?? '',        // 총클릭수
     ]
     for (const d of allDates) {
       row.push(expMap[p.id]?.has(d) ? '노출' : '')
@@ -65,6 +114,7 @@ export async function GET(req: NextRequest) {
   const ws = XLSX.utils.aoa_to_sheet([headers, ...dataRows])
   ws['!cols'] = [
     { wch: 8 }, { wch: 18 }, { wch: 28 }, { wch: 12 }, { wch: 45 }, { wch: 35 },
+    { wch: 9 }, { wch: 10 }, { wch: 10 }, { wch: 10 },
     ...allDates.map(() => ({ wch: 11 })),
   ]
   XLSX.utils.book_append_sheet(wb, ws, '노출현황')

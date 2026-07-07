@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import * as XLSX from 'xlsx'
+import { currentSource, currentContribution } from '@/lib/combined-views'
 
 interface Exposure { date: string; is_exposed: boolean }
 interface Keyword {
@@ -9,6 +10,7 @@ interface Keyword {
   tab_type: string | null; status: string; brand: string | null
   category: string | null; category2: string | null; progress: string | null
   cafe_views: number | null; image_views: number | null
+  views_base: number | null; views_offset: number | null; combined_views: number
   amos_daily_exposure: Exposure[]
 }
 // 검색량 응답 계약: volumes[키워드] = { pc, mobile, total }
@@ -434,7 +436,7 @@ export default function AdminPage() {
                     <th className="text-left px-3 py-2 whitespace-nowrap">이미지호스팅URL</th>
                     <th className="text-left px-3 py-2 whitespace-nowrap">제품링크URL</th>
                     <th className="text-right px-3 py-2 whitespace-nowrap">총 노출일</th>
-                    <th className="text-right px-3 py-2 whitespace-nowrap">카페 조회수</th>
+                    <th className="text-right px-3 py-2 whitespace-nowrap">조회수</th>
                     <th className="text-right px-3 py-2 whitespace-nowrap">총 조회수</th>
                     <th className="text-right px-3 py-2 whitespace-nowrap">총 클릭수</th>
                     <th className="px-3 py-2 w-16" />
@@ -558,11 +560,17 @@ export default function AdminPage() {
                             </td>
                             <td className="px-3 py-3 text-right text-xs text-gray-600 whitespace-nowrap">{exposureDays > 0 ? `${exposureDays}일` : '-'}</td>
                             <td className="px-3 py-3 text-right whitespace-nowrap">
-                              {row.blog_url?.includes('cafe.naver.com')
-                                ? row.cafe_views != null
-                                  ? <span className="text-xs font-semibold text-blue-600">{row.cafe_views.toLocaleString()}</span>
-                                  : <span className="text-gray-300 text-xs">-</span>
-                                : <span className="text-gray-200 text-xs">-</span>}
+                              {(() => {
+                                // 통합(누적) 조회수: 카페든 블로그든 표시. 소스 없고 누적도 0이면 '-'
+                                const cv = row.combined_views ?? 0
+                                if (cv > 0 || currentSource(row) != null) {
+                                  return <span className="text-xs font-semibold text-blue-600"
+                                    title={`이전 누적 ${(row.views_base ?? 0).toLocaleString()} + 현재 ${currentContribution(row).toLocaleString()}`}>
+                                    {cv.toLocaleString()}
+                                  </span>
+                                }
+                                return <span className="text-gray-300 text-xs">-</span>
+                              })()}
                             </td>
                             <td className="px-3 py-3 text-right whitespace-nowrap">
                               {row.image_host_url

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
+import { combinedViews } from '@/lib/combined-views'
 
 export async function GET() {
   // 두 테이블 별도 조회 후 코드에서 합치기 (nested select 관계 인식 문제 우회)
@@ -24,6 +25,7 @@ export async function GET() {
   const result = (posts || []).map(p => ({
     ...p,
     amos_daily_exposure: exposureMap[p.id] || [],
+    combined_views: combinedViews(p),  // 통합(누적) 조회수 — 프론트는 이 값만 표시
   }))
 
   return NextResponse.json(result)
