@@ -25,6 +25,45 @@ function getCode(url: string | null) {
   try { return new URL(url).pathname.split('/').filter(Boolean)[0] || null } catch { return null }
 }
 
+// 정렬 가능한 컬럼 키
+type SortKey = 'brand' | 'status' | 'progress' | 'product' | 'category' | 'category2' | 'keyword'
+  | 'volume' | 'tab_type' | 'blog_url' | 'image_host_url' | 'hwaseon_url'
+  | 'exposure_days' | 'combined_views' | 'image_views' | 'clicks'
+
+// 행에서 정렬용 값을 뽑는다. null 은 "값 없음"으로 항상 맨 뒤로 보낸다.
+function sortValue(row: Keyword, key: SortKey, volumes: Record<string, Volume>, clicks: Record<string, number>): string | number | null {
+  switch (key) {
+    case 'brand': return row.brand || null
+    case 'status': {
+      const i = STATUSES.indexOf(row.status)  // 정의된 상태 순서대로 정렬 (가나다순 아님)
+      return i >= 0 ? i : null
+    }
+    case 'progress': return row.progress || '작업중'
+    case 'product': return row.product || null
+    case 'category': return row.category || null
+    case 'category2': return row.category2 || null
+    case 'keyword': return row.keyword || null
+    case 'volume': return volumes[row.keyword]?.total ?? null
+    case 'tab_type': return row.tab_type || null
+    case 'blog_url': return row.blog_url || null
+    case 'image_host_url': return row.image_host_url || null
+    case 'hwaseon_url': return row.hwaseon_url || null
+    case 'exposure_days': return (row.amos_daily_exposure || []).filter(e => e.is_exposed).length
+    case 'combined_views': return row.combined_views ?? 0
+    case 'image_views': return row.image_host_url ? (row.image_views ?? null) : null
+    case 'clicks': return getCode(row.hwaseon_url) ? (clicks[row.id] ?? null) : null
+  }
+}
+
+// 값 비교: 숫자는 수치 비교, 문자열은 한글 로케일 비교
+function compareValues(a: string | number | null, b: string | number | null, dir: 'asc' | 'desc') {
+  if (a === null && b === null) return 0
+  if (a === null) return 1   // 값 없음은 방향과 무관하게 항상 뒤로
+  if (b === null) return -1
+  const c = typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), 'ko')
+  return dir === 'asc' ? c : -c
+}
+
 function parsePaste(raw: string) {
   return raw.split('\n').map(l => l.trim()).filter(Boolean).map(l => {
     const c = l.split('\t')
@@ -119,7 +158,13 @@ export default function AdminPage() {
   const [urlFilter, setUrlFilter] = useState('전체')
   const [productFilter, setProductFilter] = useState('제품 전체')
   const [brandFilter, setBrandFilter] = useState('브랜드 전체')
+  // 헤더 클릭 정렬: 오름차순 → 내림차순 → 해제(원래 순서)
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // 헤더 클릭 시 정렬 상태 순환
+  const toggleSort = (key: SortKey) =>
+    setSort(s => (!s || s.key !== key) ? { key, dir: 'asc' } : s.dir === 'asc' ? { key, dir: 'desc' } : null)
 
   const flash = (text: string, ok: boolean) => { setMsg({ text, ok }); setTimeout(() => setMsg(null), 3000) }
 
@@ -316,6 +361,25 @@ export default function AdminPage() {
     return true
   })
 
+  // 정렬 미지정이면 원래 순서 유지
+  const visible = sort
+    ? [...filtered].sort((a, b) => compareValues(sortValue(a, sort.key, volumes, clicks), sortValue(b, sort.key, volumes, clicks), sort.dir))
+    : filtered
+
+  // 정렬 가능한 헤더 셀 (클릭 → 오름차순 → 내림차순 → 해제)
+  const Th = ({ k, label, align = 'left', title }: { k: SortKey; label: string; align?: 'left' | 'right'; title?: string }) => {
+    const active = sort?.key === k
+    return (
+      <th className={`${align === 'right' ? 'text-right' : 'text-left'} px-3 py-2 whitespace-nowrap`} title={title}>
+        <button onClick={() => toggleSort(k)}
+          className={`inline-flex items-center gap-1 hover:text-gray-800 ${align === 'right' ? 'flex-row-reverse' : ''} ${active ? 'text-gray-800 font-semibold' : ''}`}>
+          <span>{label}</span>
+          <span className={`text-[9px] ${active ? 'text-blue-500' : 'text-gray-300'}`}>{active ? (sort!.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
+        </button>
+      </th>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
@@ -446,27 +510,27 @@ export default function AdminPage() {
                 <thead className="bg-gray-50 text-gray-500 text-xs border-b border-gray-100">
                   <tr>
                     <th className="text-left px-3 py-2 w-8 whitespace-nowrap">#</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">브랜드</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">상태</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">진행</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">제품</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">구분</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">구분2</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">키워드</th>
-                    <th className="text-right px-3 py-2 whitespace-nowrap" title="네이버 검색광고 API — 오늘 조회한 최근 30일 검색량">검색량</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">노출탭</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">발행URL</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">이미지호스팅URL</th>
-                    <th className="text-left px-3 py-2 whitespace-nowrap">제품링크URL</th>
-                    <th className="text-right px-3 py-2 whitespace-nowrap">총 노출일</th>
-                    <th className="text-right px-3 py-2 whitespace-nowrap">조회수</th>
-                    <th className="text-right px-3 py-2 whitespace-nowrap">총 조회수</th>
-                    <th className="text-right px-3 py-2 whitespace-nowrap">총 클릭수</th>
+                    <Th k="brand" label="브랜드" />
+                    <Th k="status" label="상태" />
+                    <Th k="progress" label="진행" />
+                    <Th k="product" label="제품" />
+                    <Th k="category" label="구분" />
+                    <Th k="category2" label="구분2" />
+                    <Th k="keyword" label="키워드" />
+                    <Th k="volume" label="검색량" align="right" title="네이버 검색광고 API — 오늘 조회한 최근 30일 검색량" />
+                    <Th k="tab_type" label="노출탭" />
+                    <Th k="blog_url" label="발행URL" />
+                    <Th k="image_host_url" label="이미지호스팅URL" />
+                    <Th k="hwaseon_url" label="제품링크URL" />
+                    <Th k="exposure_days" label="총 노출일" align="right" />
+                    <Th k="combined_views" label="조회수" align="right" />
+                    <Th k="image_views" label="총 조회수" align="right" />
+                    <Th k="clicks" label="총 클릭수" align="right" />
                     <th className="px-3 py-2 w-16" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {filtered.map((row, i) => {
+                  {visible.map((row, i) => {
                     const exposureDays = (row.amos_daily_exposure || []).filter(e => e.is_exposed).length
                     return (
                       <tr key={row.id} className="hover:bg-gray-50">
