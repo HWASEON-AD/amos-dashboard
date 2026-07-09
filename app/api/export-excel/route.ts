@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { supabaseAdmin } from '@/lib/supabase'
 import { combinedViews } from '@/lib/combined-views'
+import { fetchAllRows } from '@/lib/fetch-all'
 import * as XLSX from 'xlsx'
 
 export const maxDuration = 60  // 외부 fetch(총 클릭수) 다수
@@ -54,11 +55,10 @@ export async function GET(req: NextRequest) {
     .order('product')
     .order('keyword')
 
-  const { data: exposures } = await supabaseAdmin
-    .from('amos_daily_exposure')
-    .select('post_id, date')
-    .gte('date', start)
-    .lte('date', end)
+  // ⚠️ 1000행 제한 → 페이지네이션 필수
+  const exposures = await fetchAllRows<{ post_id: string; date: string }>(() =>
+    supabaseAdmin.from('amos_daily_exposure').select('post_id, date').gte('date', start).lte('date', end),
+  )
 
   // 날짜 컬럼: start~end 전체 + DB에 있는 날짜 합산 (정렬)
   const dbDates = Array.from(new Set((exposures || []).map(e => e.date)))
@@ -72,9 +72,9 @@ export async function GET(req: NextRequest) {
   }
 
   // 총 노출일: 기간 필터와 무관하게 전체 기간 기준 post_id별 노출일 수
-  const { data: allExp } = await supabaseAdmin
-    .from('amos_daily_exposure')
-    .select('post_id')
+  const allExp = await fetchAllRows<{ post_id: string }>(() =>
+    supabaseAdmin.from('amos_daily_exposure').select('post_id'),
+  )
   const totalExpMap: Record<string, number> = {}
   for (const e of allExp || []) {
     totalExpMap[e.post_id] = (totalExpMap[e.post_id] || 0) + 1
