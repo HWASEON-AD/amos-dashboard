@@ -89,8 +89,8 @@ export async function GET(req: NextRequest) {
     }),
   )
 
-  // 단일 시트: 브랜드|제품|키워드|노출탭|발행URL|제품링크URL|총노출일|조회수|총조회수|총클릭수|날짜1|...
-  const headers = ['브랜드', '제품', '키워드', '노출탭', '발행URL', '제품링크URL', '총노출일', '조회수', '총조회수', '총클릭수', ...allDates]
+  // 단일 시트: 브랜드|제품|키워드|노출탭|발행URL|제품링크URL|총노출일|총조회수|총클릭수|날짜1|...
+  const headers = ['브랜드', '제품', '키워드', '노출탭', '발행URL', '제품링크URL', '총노출일', '총조회수', '총클릭수', ...allDates]
   const dataRows = (posts || []).map(p => {
     const row: (string | number)[] = [
       p.brand || '아모스',
@@ -100,8 +100,7 @@ export async function GET(req: NextRequest) {
       p.blog_url || '',
       p.hwaseon_url || '',
       totalExpMap[p.id] || 0,      // 총노출일 (전체 기간)
-      combinedViews(p),            // 조회수 (통합/누적)
-      p.image_views ?? '',         // 총조회수 (image_views raw)
+      combinedViews(p),            // 총조회수 (카페+이미지+과거보존 누적)
       clickMap[p.id] ?? '',        // 총클릭수
     ]
     for (const d of allDates) {

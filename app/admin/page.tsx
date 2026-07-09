@@ -29,7 +29,7 @@ function getCode(url: string | null) {
 // 정렬 가능한 컬럼 키
 type SortKey = 'brand' | 'status' | 'progress' | 'product' | 'category' | 'category2' | 'keyword'
   | 'volume' | 'tab_type' | 'blog_url' | 'image_host_url' | 'hwaseon_url'
-  | 'exposure_days' | 'combined_views' | 'image_views' | 'clicks'
+  | 'exposure_days' | 'combined_views' | 'clicks'
 
 // 행에서 정렬용 값을 뽑는다. null 은 "값 없음"으로 항상 맨 뒤로 보낸다.
 function sortValue(row: Keyword, key: SortKey, volumes: Record<string, Volume>, clicks: Record<string, number>): string | number | null {
@@ -51,7 +51,6 @@ function sortValue(row: Keyword, key: SortKey, volumes: Record<string, Volume>, 
     case 'hwaseon_url': return row.hwaseon_url || null
     case 'exposure_days': return (row.amos_daily_exposure || []).filter(e => e.is_exposed).length
     case 'combined_views': return row.combined_views ?? 0
-    case 'image_views': return row.image_host_url ? (row.image_views ?? null) : null
     case 'clicks': return clicks[row.id] ?? null
   }
 }
@@ -558,8 +557,7 @@ export default function AdminPage() {
                     <Th k="image_host_url" label="이미지호스팅URL" />
                     <Th k="hwaseon_url" label="제품링크URL" />
                     <Th k="exposure_days" label="총 노출일" align="right" />
-                    <Th k="combined_views" label="조회수" align="right" />
-                    <Th k="image_views" label="총 조회수" align="right" />
+                    <Th k="combined_views" label="총 조회수" align="right" />
                     <Th k="clicks" label="총 클릭수" align="right" />
                     <th className="px-3 py-2 w-16" />
                   </tr>
@@ -643,7 +641,6 @@ export default function AdminPage() {
                                 </div>
                               </td>
                             ))}
-                            <td className="px-3 py-1.5 text-gray-300 text-xs text-right">-</td>
                             <td className="px-3 py-1.5 text-gray-300 text-xs text-right">-</td>
                             <td className="px-3 py-1.5 text-gray-300 text-xs text-right">-</td>
                             <td className="px-3 py-1.5 text-gray-300 text-xs text-right">-</td>
@@ -761,13 +758,6 @@ export default function AdminPage() {
                               })()}
                             </td>
                             <td className="px-3 py-3 text-right whitespace-nowrap">
-                              {row.image_host_url
-                                ? row.image_views != null
-                                  ? <span className="text-xs font-semibold text-emerald-600">{row.image_views.toLocaleString()}</span>
-                                  : <span className="text-gray-300 text-xs">-</span>
-                                : <span className="text-gray-200 text-xs">-</span>}
-                            </td>
-                            <td className="px-3 py-3 text-right whitespace-nowrap">
                               {getCode(row.hwaseon_url) && clicks[row.id] != null
                                 ? <span className="text-xs font-semibold text-purple-700">{clicks[row.id].toLocaleString()}</span>
                                 : <span className="text-gray-300 text-xs">-</span>}
@@ -842,16 +832,16 @@ export default function AdminPage() {
                           className="border border-gray-300 rounded px-2 py-1 text-xs w-full focus:outline-none focus:ring-1 focus:ring-blue-400" />
                       </td>
                     ))}
-                    <td colSpan={4} />
+                    <td colSpan={3} />
                     <td className="px-2 py-2">
                       <button onClick={add} className="px-3 py-1 bg-green-600 text-white rounded text-xs hover:bg-green-700">추가</button>
                     </td>
                   </tr>
                   {filtered.length === 0 && rows.length > 0 && (
-                    <tr><td colSpan={18} className="text-center py-8 text-gray-400 text-sm">필터 결과 없음</td></tr>
+                    <tr><td colSpan={17} className="text-center py-8 text-gray-400 text-sm">필터 결과 없음</td></tr>
                   )}
                   {rows.length === 0 && (
-                    <tr><td colSpan={18} className="text-center py-10 text-gray-400">데이터 없음</td></tr>
+                    <tr><td colSpan={17} className="text-center py-10 text-gray-400">데이터 없음</td></tr>
                   )}
                 </tbody>
               </table>
