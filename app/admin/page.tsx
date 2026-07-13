@@ -445,8 +445,8 @@ export default function AdminPage() {
                   className="px-3 py-1.5 rounded text-xs bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200">
                   📥 양식 다운로드
                 </button>
-                <a href="/api/export-excel" className="px-3 py-1.5 rounded text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200">
-                  📤 현재 데이터 다운로드 (단일 시트)
+                <a href="/api/export-excel" download className="px-3 py-1.5 rounded text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200">
+                  📤 전체 데이터 다운로드 (단일 시트)
                 </a>
               </div>
             </div>
@@ -509,6 +509,12 @@ export default function AdminPage() {
           <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between flex-wrap gap-2">
             <span className="text-sm font-semibold text-gray-700">키워드 관리</span>
             <div className="flex items-center gap-2">
+              {/* 임포트 패널을 열지 않아도 바로 전체 데이터를 받을 수 있게 */}
+              <a href="/api/export-excel" download
+                className="px-3 py-1 rounded text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+                title="전체 키워드 · 전체 기간 노출기록을 엑셀로 다운로드">
+                📥 엑셀 다운로드
+              </a>
               <button onClick={refreshViews} disabled={refreshingViews}
                 className="px-3 py-1 rounded text-xs font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">
                 {refreshingViews ? '갱신 중…' : '조회수 새로고침'}
